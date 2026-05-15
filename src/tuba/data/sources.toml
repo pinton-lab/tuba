@@ -1,0 +1,294 @@
+# TUBA data-source manifest
+# =========================
+#
+# Single point of truth for the external datasets TUBA depends on.
+# Every external file referenced by `tuba.species.*` or `tuba.atlases.*`
+# must have a row in this manifest. The schema is uniform across
+# datasets so downstream tooling can iterate.
+#
+# Schema (per entry)
+# ------------------
+#   key            : dotted path, [<species>.<role>] or [atlas.<name>]
+#   role           : "skull" | "atlas_template" | "atlas_annotation" |
+#                    "atlas_parcellation" | "ancillary"
+#   description    : one-line human summary
+#   citation       : free-form citation string (paper + DOI when known)
+#   doi            : DOI URL (omit if not available)
+#   source_url     : landing page (preferred over raw blob URL when both
+#                    exist, so users see the host's licensing context)
+#   blob_urls      : list of direct-fetch URLs (omit if interactive-only)
+#   license        : SPDX-style tag if known; "open (FAIR)" /
+#                    "open (unstated)" / "CC BY-NC" / "interactive-only"
+#                    otherwise. "unknown" iff the host surfaces nothing.
+#   auth_required  : "none" | "click-through" | "login+approval"
+#   fetcher_script : repo-relative path to a fetcher (helper script or
+#                    one of the legacy `templates/fetch_*.py` files);
+#                    OMIT the key entirely when no fetcher exists.
+#                    TOML has no null literal -- the loader fills in
+#                    None via dataclass defaults for missing keys.
+#   format         : "TIFF stack" | "NRRD" | "NIfTI" | "tarball" | ...
+#   voxel_um       : isotropic voxel size in micrometres
+#                    (use voxel_mm for >= 1 mm scans)
+#   approx_size_gb : decompressed footprint estimate
+#   sha256         : omit until the user pins a checksum (string).
+#   n_specimens    : 1 unless the dataset is multi-subject
+#   notes          : free-form caveats / gotchas
+#
+# When adding a new species, append a new top-level table.
+# Conventions:
+#   * Use ISO-style integers for sizes; never floats with units inline.
+#   * Omit a key entirely for "unknown" (TOML has no null literal).
+#     Consumers see Source.<field> == None via the loader's defaults.
+#   * Don't dedup citations across entries; each entry stands alone.
+
+# =============================================================================
+# Mouse
+# =============================================================================
+
+[mouse.skull]
+role = "skull"
+description = "Adult mouse dry skull, Skyscan 1272 4K detector, 6.127 um iso"
+citation = "M. Maga and collaborators, Sample microCT data from the SCRI Bone and Skeletal Mechanics Lab. University of Washington."
+source_url = "https://faculty.washington.edu/maga/SCRI_MicroCT/"
+blob_urls = ["https://app.box.com/s/mtvctm7rus8udrav7qkrraq3syatvf5n"]
+license = "open (unstated)"
+auth_required = "click-through"
+fetcher_script = "src/tuba/data/fetch_mouse.py"
+format = "TIFF stack (uint16)"
+voxel_um = 6.127
+approx_size_gb = 35.0
+n_specimens = 1
+archive_sha256 = "1be081202123b766b92277d38888c8fd52c6e1ddca482bd443e7c5b46275c9e0"
+archive_name = "dry_skull_4K_6.125micron_Rec.zip"
+notes = "Dry skull, no soft tissue, no jaw, no spine, no in-situ brain. Box.com requires interactive download (no unauthenticated direct fetch)."
+
+[mouse.atlas_template]
+role = "atlas_template"
+description = "Allen Mouse CCFv3 average template, 25 um isotropic"
+citation = "Q. Wang, S.-L. Ding, Y. Li, et al. The Allen Mouse Brain Common Coordinate Framework: A 3D Reference Atlas. Cell 181(4):936-953.e20, 2020."
+doi = "https://doi.org/10.1016/j.cell.2020.04.007"
+source_url = "http://download.alleninstitute.org/informatics-archive/current-release/mouse_ccf/"
+blob_urls = [
+    "http://download.alleninstitute.org/informatics-archive/current-release/mouse_ccf/average_template/average_template_25.nrrd",
+]
+license = "open (Allen Brain Atlas terms)"
+auth_required = "none"
+fetcher_script = "src/tuba/data/fetch_allen.py"
+format = "NRRD"
+voxel_um = 25.0
+approx_size_gb = 0.05
+sha256 = "e4a2b483e842b4c8c1b5452d940ea59e14bc1ebaa38fe6a9c3bacac6db2a8f4b"
+n_specimens = 1675  # CCFv3 average is built from ~1,675 mice
+notes = "10 um and 50 um variants also available at the same root path; TUBA binds to 25 um as the SyN fixed-grid and the 10 um as the warped-product source."
+
+[mouse.atlas_annotation]
+role = "atlas_annotation"
+description = "Allen Mouse CCFv3 structure-id volume, 25 um isotropic"
+citation = "Q. Wang, S.-L. Ding, Y. Li, et al. (2020). CCFv3 annotation, 2017 release."
+doi = "https://doi.org/10.1016/j.cell.2020.04.007"
+source_url = "http://download.alleninstitute.org/informatics-archive/current-release/mouse_ccf/"
+blob_urls = [
+    "http://download.alleninstitute.org/informatics-archive/current-release/mouse_ccf/annotation/ccf_2017/annotation_25.nrrd",
+]
+license = "open (Allen Brain Atlas terms)"
+auth_required = "none"
+fetcher_script = "src/tuba/data/fetch_allen.py"
+format = "NRRD (uint32 label volume)"
+voxel_um = 25.0
+approx_size_gb = 0.03
+sha256 = "c620cbcc562183e4dcd40250d440130501781f74b41de35b1c1bdabace290c42"
+companion_files = [
+    { name = "structure_tree.json", sha256 = "b5f0d024d1df09ee18aef15093f55240f4a70b3924ee9689add612dadff80386", size_mb = 1 },
+]
+n_specimens = 1
+notes = "Companion structure tree fetched separately from http://api.brain-map.org/api/v2/structure_graph_download/1.json (cc body id = 484682516; cc parent = 776)."
+
+# =============================================================================
+# Macaque
+# =============================================================================
+
+[macaque.skull]
+role = "skull"
+description = "Adult Macaca mulatta dry skull microCT (MorphoSource)"
+citation = "L. R. Copes, L. A. P. Lucas, J. R. Thostenson, H. E. Hoekstra, D. M. Boyer. A collection of non-human primate computed tomography scans housed in MorphoSource. Sci Data 3:160001, 2016."
+doi = "https://doi.org/10.1038/sdata.2016.1"
+source_url = "https://www.morphosource.org/catalog/media?q=Macaca+mulatta+MCZ&search_field=all_fields&f%5Bmedia_type_sim%5D%5B%5D=CTImageSeries"
+blob_urls = []
+license = "CC BY-NC"
+auth_required = "login+approval"
+fetcher_script = "src/tuba/data/fetch_macaque.py"
+format = "TIFF stack (uint16) or NIfTI"
+voxel_um = 90.75
+approx_size_gb = 2.5
+n_specimens = 1  # one specimen pulled from the MCZ collection per pipeline run
+notes = "MorphoSource catalogue API is bot-protected (Cloudflare Anubis); fetcher prints search URL + drop location and unpacks any archive that lands locally. Catalogue example: MCZ:Mamm:30384."
+
+[macaque.atlas_template]
+role = "atlas_template"
+description = "NMT v2.0 symmetric T1 template, 0.25 mm isotropic"
+citation = "B. Jung, P. A. Taylor, J. S. Seidlitz, et al. A comprehensive macaque fMRI pipeline and hierarchical atlas. NeuroImage 235:117997, 2021."
+doi = "https://doi.org/10.1016/j.neuroimage.2021.117997"
+source_url = "https://afni.nimh.nih.gov/pub/dist/atlases/macaque/nmt/"
+blob_urls = [
+    "https://afni.nimh.nih.gov/pub/dist/atlases/macaque/nmt/NMT_v2.0_sym.tgz",
+]
+license = "open (NIMH/AFNI public)"
+auth_required = "none"
+fetcher_script = "src/tuba/data/fetch_nmt.py"
+format = "tarball of NIfTI"
+voxel_um = 250.0
+approx_size_gb = 0.4
+archive_sha256 = "9c455431ec1e8257fef4127c137e49f710aa43ef8a87f1bf73701b83d5ef7e6d"
+archive_name = "NMT_v2.0_sym.tgz"
+n_specimens = 31  # NMT v2 sym is built from 31 macaques
+notes = "Tarball bundles NMT_v2.0_sym/ (0.25 mm), NMT_v2.0_sym_05mm/, NMT_v2.0_sym_fh/ (full-head FOV, the one TUBA uses for ANTs against an endocranial cavity), and tables_CHARM / tables_SARM / tables_D99 parcellations."
+
+[macaque.atlas_parcellation_charm]
+role = "atlas_parcellation"
+description = "CHARM cortical hierarchy (6 levels) on NMT v2.0 sym"
+citation = "L. Reveley, F. Q. Ye, J. Mars, et al. CHARM: A cytoarchitectonic-based macaque atlas. NeuroImage 235:117993, 2021."
+doi = "https://doi.org/10.1016/j.neuroimage.2021.117993"
+source_url = "https://afni.nimh.nih.gov/pub/dist/atlases/macaque/nmt/"
+blob_urls = []  # ships inside NMT_v2.0_sym.tgz under tables_CHARM/
+license = "open (NIMH/AFNI public)"
+auth_required = "none"
+fetcher_script = "src/tuba/data/fetch_nmt.py"
+format = "NIfTI label volumes + CSV"
+voxel_um = 250.0
+approx_size_gb = 0.05
+n_specimens = 1
+notes = "Bundled with NMT_v2.0_sym.tgz; do not fetch separately."
+
+[macaque.atlas_parcellation_sarm]
+role = "atlas_parcellation"
+description = "SARM subcortical hierarchy (6 levels) on NMT v2.0 sym"
+citation = "J. F. Hartig, et al. SARM: A subcortical atlas for the rhesus macaque. NeuroImage 235:117996, 2021."
+doi = "https://doi.org/10.1016/j.neuroimage.2021.117996"
+source_url = "https://afni.nimh.nih.gov/pub/dist/atlases/macaque/nmt/"
+blob_urls = []
+license = "open (NIMH/AFNI public)"
+auth_required = "none"
+fetcher_script = "src/tuba/data/fetch_nmt.py"
+format = "NIfTI label volumes + CSV"
+voxel_um = 250.0
+approx_size_gb = 0.05
+n_specimens = 1
+notes = "Bundled with NMT_v2.0_sym.tgz under tables_SARM/."
+
+# =============================================================================
+# Human
+# =============================================================================
+
+[human.skull]
+role = "skull"
+description = "Ex vivo adult human skull microCT, Nikon XT H 225 cone-beam"
+citation = "T. Kirchner. A micro-CT of a human skull. Zenodo data descriptor, 2022-02-22."
+doi = "https://doi.org/10.5281/zenodo.6108435"
+source_url = "https://zenodo.org/records/6108435"
+blob_urls = [
+    "https://zenodo.org/records/6108435/files/halle_skull.nrrd",
+    "https://zenodo.org/records/6108435/files/halle_skull_segmented.nrrd",
+    "https://zenodo.org/records/6108435/files/halle_skull_2D_projections.zip",
+    "https://zenodo.org/records/6108435/files/etc.zip",
+]
+license = "open (FAIR)"
+auth_required = "none"
+fetcher_script = "src/tuba/data/fetch_human.py"
+format = "NRRD (int16, ~HU)"
+voxel_mm = 0.125
+approx_size_gb = 5.5
+sha256 = "dbeae510b885e3b04492469e1b09d7cdddb28f58c708ecc9207d14b050e6d7db"
+companion_files = [
+    { name = "halle_skull_segmented.nrrd", sha256 = "7cbb67ff56c2682515f3dd681044a36231be8526b9101332f9b720dec9c185e8" },
+]
+n_specimens = 1
+notes = "Ex vivo skull of a 70-year-old male body donor (Institute of Anatomy, Martin-Luther-Universitat Halle-Wittenberg). 2501 cone-beam projections at 150 kV / 400 uA, 1 mm Cu filter, 1150x1700x1400 16-bit signed. HU values are ad-hoc cone-beam calibrated and should not be interpreted as quantitative. Stored in LAS orientation despite the NRRD header tagging RAS -- see tuba/species/human.py for the affine override."
+
+[human.atlas_template]
+role = "atlas_template"
+description = "MNI152 ICBM 2009a non-linear symmetric T1 template, 1 mm"
+citation = "V. Fonov, A. C. Evans, K. Botteron, et al. Unbiased average age-appropriate atlases for pediatric studies. NeuroImage 54(1):313-327, 2011."
+doi = "https://doi.org/10.1016/j.neuroimage.2010.07.033"
+source_url = "https://nist.mni.mcgill.ca/icbm-152-nonlinear-atlases-2009/"
+blob_urls = []  # nilearn.datasets.fetch_icbm152_2009 handles this
+license = "open (MNI/MCGill)"
+auth_required = "none"
+format = "NIfTI"
+voxel_mm = 1.0
+approx_size_gb = 0.04
+n_specimens = 152
+notes = "Fetched on demand by nilearn; cached under ~/nilearn_data/icbm152_2009/. TUBA expects the symmetric 2009a variant."
+
+[human.atlas_parcellation_harvard_oxford]
+role = "atlas_parcellation"
+description = "Harvard-Oxford cortical + subcortical structural atlas (FSL)"
+citation = "FSL atlases (Desikan-Killiany-derived; ships with FSL since v4.1)."
+source_url = "https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/Atlases"
+blob_urls = []  # nilearn handles
+license = "FSL license (non-commercial open)"
+auth_required = "none"
+format = "NIfTI"
+voxel_mm = 1.0
+approx_size_gb = 0.02
+n_specimens = 1
+notes = "TUBA loads this via nilearn at first use; no manual staging required."
+
+[human.atlas_parcellation_schaefer_400]
+role = "atlas_parcellation"
+description = "Schaefer 2018 cortical parcellation, 400 parcels, 7 networks, 1 mm"
+citation = "A. Schaefer, R. Kong, E. M. Gordon, et al. Local-global parcellation of the human cerebral cortex from intrinsic functional connectivity MRI. Cerebral Cortex 28(9):3095-3114, 2018."
+doi = "https://doi.org/10.1093/cercor/bhx179"
+source_url = "https://github.com/ThomasYeoLab/CBIG/tree/master/stable_projects/brain_parcellation/Schaefer2018_LocalGlobal"
+blob_urls = []
+license = "MIT (CBIG)"
+auth_required = "none"
+format = "NIfTI"
+voxel_mm = 1.0
+approx_size_gb = 0.01
+n_specimens = 1489  # GSP + HNU1 etc., per Schaefer 2018 cohort
+notes = "1000-parcel variant also available via the same fetcher."
+
+[human.atlas_parcellation_aal]
+role = "atlas_parcellation"
+description = "AAL (Automated Anatomical Labeling) atlas, MNI space"
+citation = "N. Tzourio-Mazoyer, B. Landeau, D. Papathanassiou, et al. Automated anatomical labeling of activations in SPM using a macroscopic anatomical parcellation of the MNI MRI single-subject brain. NeuroImage 15(1):273-289, 2002."
+doi = "https://doi.org/10.1006/nimg.2001.0978"
+source_url = "https://www.gin.cnrs.fr/en/tools/aal/"
+blob_urls = []
+license = "open (CNRS)"
+auth_required = "none"
+format = "NIfTI"
+voxel_mm = 2.0
+approx_size_gb = 0.005
+n_specimens = 1
+notes = "Single-subject atlas; coarser than Schaefer but commonly used in clinical reports."
+
+[human.atlas_parcellation_yeo_7networks]
+role = "atlas_parcellation"
+description = "Yeo 2011 7-networks resting-state parcellation, 1 mm"
+citation = "B. T. T. Yeo, F. M. Krienen, J. Sepulcre, et al. The organization of the human cerebral cortex estimated by intrinsic functional connectivity. J Neurophysiol 106(3):1125-1165, 2011."
+doi = "https://doi.org/10.1152/jn.00338.2011"
+source_url = "https://surfer.nmr.mgh.harvard.edu/fswiki/CorticalParcellation_Yeo2011"
+blob_urls = []
+license = "open (FreeSurfer license)"
+auth_required = "none"
+format = "NIfTI (FreeSurferConformed 1 mm)"
+voxel_mm = 1.0
+approx_size_gb = 0.01
+n_specimens = 1000
+notes = "17-network variant also fetchable from the same call."
+
+[human.atlas_parcellation_pauli_subcortex]
+role = "atlas_parcellation"
+description = "Pauli 2017 deterministic subcortical atlas"
+citation = "W. M. Pauli, A. N. Nili, J. M. Tyszka. A high-resolution probabilistic in vivo atlas of human subcortical brain nuclei. Sci Data 5:180063, 2018."
+doi = "https://doi.org/10.1038/sdata.2018.63"
+source_url = "https://osf.io/r2hvk/"
+blob_urls = []
+license = "CC0"
+auth_required = "none"
+format = "NIfTI"
+voxel_mm = 1.0
+approx_size_gb = 0.005
+n_specimens = 168
+notes = "Probabilistic variant also available; TUBA wires the deterministic one for label-based target lookup."

@@ -1,0 +1,1199 @@
+% Halle (Anatomical Institute Halle) human skull microCT -- pipeline narrative.
+% Build:
+%   pdflatex manuscript
+%   pdflatex manuscript
+
+\documentclass{compactarticle}
+
+\usepackage{amsmath,amssymb,amsfonts,bm}
+\usepackage{graphicx}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{ragged2e}
+\usepackage{url}
+
+\graphicspath{{figures/}}
+
+\providecommand{\br}{\toprule}
+\providecommand{\mr}{\midrule}
+
+\begin{document}
+\justifying
+\fancyhead[R]{\small\itshape Halle human skull pipeline}
+
+\articletype{Validation report}
+
+\title{MNI152 to Halle dry-skull microCT pipeline for human transcranial
+focused ultrasound: cross-modality registration, ray-cast outer-table
+extraction, and perpendicular-to-skull placement}
+
+\author{Gianmarco F Pinton}
+
+\affil{Joint Department of Biomedical Engineering, University of North
+       Carolina at Chapel Hill and North Carolina State University}
+
+\email{gia@email.unc.edu}
+
+\keywords{transcranial focused ultrasound, human, micro-CT, skull, MNI152,
+          ANTs SyN, angular spectrum, neuromodulation}
+
+\begin{abstract}
+We document the registration, surface-extraction, and placement steps that
+together place a focused-ultrasound bowl on an MNI-defined anatomical target
+through the Halle dry-skull human micro-CT (0.125\,mm isotropic, Zenodo
+release). Three design choices distinguish this pipeline from its mouse
+(DigiMouse $\rightarrow$ Maga 4K) and macaque (NMT v2) twins:
+(i) cross-modality ANTs~SyN with a clinical-CT fixed image and a T1 MRI
+template moving image (mutual-information cost), in place of the binary
+cavity-to-brain-mask registration used for the mouse and macaque; (ii) a
+ray-cast outer-bone-table surface that records the outermost cortical voxel
+along each spherical ray from the bone-mass centroid, in place of a
+morphological-closing envelope that would sit on the inner table;
+(iii) perpendicular-to-skull bowl placement guided by surface normals and
+constrained to a neighbourhood of a warped EEG site, in place of a
+dorsal-cylinder apex search around the target's lateral projection. We also
+document the empirically determined LAS-vs-LPS storage convention of the
+Halle NRRD (the file header is wrong), the Hounsfield-anchored piecewise-
+linear intensity-to-acoustic ramp used by the slab loader, and the
+coordinate-frame migration required to bring this pipeline under TUBA's
+``world-mm everywhere'' convention. Source data is reproducible: the Halle
+volume is fetched from Zenodo by \texttt{setup/fetch\_halle\_skull.py}; the
+MNI152 ICBM 2009a non-linear symmetric template is fetched by
+\texttt{templates/fetch\_mni152.py}; processing modules live alongside the
+neuromod\_parameters pipeline in \texttt{registration/}.
+\end{abstract}
+
+\section{Source data}\label{sec:source}
+The Halle skull is a dry adult human cranium digitised by the Anatomical
+Institute of the Martin-Luther-University Halle-Wittenberg and released on
+Zenodo under \texttt{halle\_skull.nrrd} (1.6\,GB compressed)~\cite{halle_zenodo}.
+The volume is reconstructed at a $0.125$\,mm isotropic voxel pitch from a
+clinical-CT acquisition; intensities are calibrated in Hounsfield units
+(HU), unlike the raw NRecon counts that the Maga 4K mouse and AMNH macaque
+scans deliver. Air sits at $\mathrm{HU}\approx -1000$, soft tissue (when
+present) at $\mathrm{HU}\approx 0$--$80$, and cortical bone at
+$\mathrm{HU}\approx 700$--$2000$.
+
+The reconstructed volume is dry skull only: no scalp, no in-situ brain, no
+soft tissue. Downstream MNI-template registration therefore must rely on
+the {\em outer} envelope of the bone (the head surface the MNI152
+average-T1 volume sits on); the {\em inner} cavity, which the mouse and
+macaque pipelines use, cannot be cleanly matched against MNI because
+MNI152 is a head template (skull plus scalp), not a brain-only template.
+
+Fig.~\ref{fig:halle_native} shows three orthogonal sections through the
+\emph{native} 0.125\,mm Halle CT at the cortical-bone-mass centroid;
+diplo\"e, trabecular basicranium, zygomatic processes, and dental
+arches are resolved at the sub-millimetre scale that the microCT
+acquisition was acquired for. The cavity is empty (air,
+$\mathrm{HU}\approx -1000$). Table~\ref{tab:source} summarises the
+scan parameters next to the DigiMouse, Maga 4K, and AMNH macaque
+references for context.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{fig1_halle_native.png}
+\caption{Halle dry-skull microCT at \emph{native} 0.125\,mm.
+Orthoslices through the cortical-bone centroid (sagittal, coronal,
+axial; left to right) at percentile-clipped $[0.5\%, 99.5\%]$
+greyscale. Each panel is a $\sim$1\,150--1\,700-pixel cross-section
+along its in-plane axes; cortical bone, diplo\"e, trabecular
+basicranium, dental arches, and zygomatic processes are all resolved
+at the sub-millimetre detail the microCT acquisition was designed for.
+The endocranial cavity is air-filled (dry skull); the 1\,mm ANTs
+working cache of \S\ref{sec:downsample} would smooth this detail down
+to a $\sim$143-pixel grid.}
+\label{fig:halle_native}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{Halle dry-skull microCT scan parameters in cross-species
+context.}\label{tab:source}
+\begin{tabular}{lllll}
+\toprule
+Property & DigiMouse & Maga 4K & AMNH macaque & Halle human \\
+\midrule
+Voxel pitch ($\mu$m, iso) & 100 & 6.127 & 60.6 & 125 \\
+Field of view (mm$^3$, approx) & $38\times99\times21$ & $15.9\times23.8\times11.7$ & $130\times130\times130$ & $250\times250\times250$ \\
+Coverage & whole body & head only (dry) & head only (dry) & head only (dry) \\
+Soft tissue / in-situ brain & yes (cryo) & no & no & no \\
+Intensity calibration & none (uint8) & none (uint16) & none (uint16) & HU (clinical CT) \\
+Native file size & 78\,MB & $\sim$38\,GB & $\sim$5\,GB & $\sim$1.6\,GB \\
+Atlas mode in TUBA & cavity\_binary & cavity\_binary & cavity\_binary & intensity \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The HU calibration is the practical entry-point for the human pipeline that
+the mouse case did not have: it anchors the cortical-bone endpoint of the
+piecewise-linear acoustic-property ramp (\S\ref{sec:acoustic}) to physical
+density without any hydroxyapatite-phantom intervention, and it lets the
+intensity-mode ANTs SyN cross-modality cost (\S\ref{sec:registration}) work
+without first binarising the volume.
+
+\section{MNI152 ICBM 2009a non-linear symmetric template}\label{sec:atlas}
+The reference anatomy is the MNI152 ICBM 2009a non-linear symmetric
+T1-weighted template~\cite{fonov2009}, a $1$\,mm isotropic average of 152
+adult subjects produced by the McConnell Brain Imaging Centre. The
+template ships with a companion brain mask
+(\texttt{mni\_icbm152\_t1\_tal\_nlin\_sym\_09a\_mask.nii}) and is cached
+in \texttt{templates/mni152\_icbm\_2009a/}; both are fetched by
+\texttt{templates/fetch\_mni152.py}.
+
+Two qualitative differences from the mouse Allen CCFv3 reference shape the
+rest of the pipeline:
+
+\begin{itemize}
+\item {\em MNI is a head template.} The T1 voxels include scalp,
+  subcutaneous fat, skull, and brain. There is no clean brain-only
+  template against which a Halle cavity could be SyN-registered; the
+  brain mask is provided as a separate post-segmentation product, not
+  as the primary registration target.
+\item {\em MNI is in RAS world coords.} Anatomical targets and EEG sites
+  are conventionally quoted in MNI RAS millimetres. ANTs internally
+  operates in LPS world coords, so the placement helper carries an
+  explicit RAS$\leftrightarrow$LPS sign convention at each transform
+  application step (\S\ref{sec:placement}).
+\end{itemize}
+
+We publish two named-coordinate dictionaries downstream alongside the
+template binding:
+
+\begin{itemize}
+\item \texttt{ANATOMICAL\_TARGETS\_MNI} (50+ entries): standard atlas
+  centroids in MNI RAS\,mm. Coverage includes S1, M1, V1, V5,
+  the subthalamic nucleus, the ventral-intermediate (Vim) thalamus, the
+  thalamus central, caudate, dorsolateral prefrontal cortex (DLPFC), ACC,
+  PCC, insula, amygdala, entorhinal cortex, pre-SMA, the cerebellar
+  vermis, auditory cortex (A1), temporal-lobe centroids, hippocampus,
+  rPFC / lPFC / vmPFC, nucleus accumbens, and (as aliases) V1, A1, ACC,
+  PCC, pre-SMA, cerebellum, and thalamus left/right pairs used by the
+  human-skull sweep.
+\item \texttt{EEG\_SITES\_MNI} (22 entries): standard 10--20 EEG site
+  coordinates in MNI RAS\,mm, from Jurcak~et~al.~\cite{jurcak2007}.
+  Fp1/2, F3/4/7/8, C3/4, Cz, CP3/4, P3/4, O1/2, Oz, T3/4/5/6, AF3/4.
+\end{itemize}
+
+These are consumed by the placement helper of \S\ref{sec:placement} to
+resolve a (scalp-site, anatomical-target) pair into a bowl placement on
+the Halle skull. The MNI152 binding lives at
+\texttt{tuba.atlases.mni152.MNI152} with both dicts exposed at module level.
+
+\paragraph{Anatomical annotation.}
+For region-of-interest extraction, the MNI152 template is paired with
+one of several volumetric parcellation atlases. The TUBA human binding
+ships {\em three} atlases as drop-in alternatives, spanning the
+coarse-to-fine spectrum that downstream analyses typically need:
+
+\begin{itemize}
+\item {\em Harvard-Oxford} (cortical-lateralized + subcortical, merged
+  into 117 labels). The 1\,mm maximum-probability ``thr25'' variants
+  distributed by FSL via the nilearn data cache~\cite{harvardoxford}.
+  Coverage: 48 cortical regions $\times$ 2 hemispheres = 96 cortical
+  IDs (Frontal Pole, Insular Cortex, ..., Occipital Pole), plus 21
+  subcortical IDs (brainstem, plus left/right cerebral white matter,
+  cerebral cortex, lateral ventricle, thalamus, caudate, putamen,
+  pallidum, hippocampus, amygdala, accumbens). We merge the two with
+  the subcortical IDs offset by the cortical maximum (96) to keep all
+  117 IDs unique; the cortical-lateralized label is preferred where
+  the two overlap.
+
+\item {\em Schaefer 400 (7 networks)}. The 400-region cortical
+  parcellation of Schaefer et al.~\cite{schaefer2018} aligned to the
+  Yeo-7 functional networks, in MNI152 1\,mm space. 200 regions per
+  hemisphere; subcortical structures are not covered.
+
+\item {\em Schaefer 1000 (7 networks)}. The 1\,000-region variant of
+  the same construction; the finest cortical parcellation we
+  routinely use.
+\end{itemize}
+
+All three atlases live in MNI space on the FSL 1\,mm grid (shape
+$182\times 218\times 182$, origin $(90, -126, -72)$ in RAS) which is
+{\em different} from the ICBM 2009a template grid ($197\times 233
+\times 189$, origin $(-98, -134, -72)$). The two grids are sampled at
+the same world coordinates when figures need to overlay them.
+
+The Glasser HCP-MMP1 cortical parcellation (360 cortical regions, 180
+per hemisphere) is the natural high-resolution non-network alternative
+but is distributed only via the BALSA database under registered access;
+we omit it from the default binding for licensing reasons. The
+swap-in pattern documented here (resample to MNI, then apply the
+saved SyN forward transform with nearest-neighbour interpolation)
+works for any volumetric label atlas in MNI space, so callers with
+BALSA access can drop Glasser into the same slot.
+
+These are the human counterparts of the Allen CCFv3 annotation in the
+mouse pipeline: each provides a parcellation that is unambiguously
+coordinate-aligned to the registration template and can be warped
+through the saved SyN transforms to land in Halle skull space for
+target-centroid extraction (\S\ref{sec:placement}).
+
+Fig.~\ref{fig:mni_template} shows three orthogonal sections through the
+MNI152 T1 template at the anterior commissure (world $(0,0,0)$) next
+to the three parcellations at the same world coordinates; the layout
+mirrors the mouse manuscript's template-and-atlas figure. The
+granularity progression Harvard-Oxford~$\rightarrow$~Schaefer~400
+$\rightarrow$~Schaefer~1000 is visible immediately: Harvard-Oxford
+identifies anatomical lobes and major subcortical nuclei, Schaefer 400
+breaks each cortical gyrus into a handful of patches aligned to
+functional connectivity boundaries, Schaefer 1000 resolves the cortical
+mantle at the network-cluster scale.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{fig2_mni_template.png}
+\caption{MNI152 ICBM 2009a T1 template ({\em column 1}; greyscale,
+1\,mm isotropic, brain mask in cyan) next to the three parcellation
+atlases ({\em columns 2--4}): Harvard-Oxford (117 cortical +
+subcortical labels), Schaefer 400 (cortical only, 7-network),
+Schaefer 1000 (cortical only, 7-network). Labels are rendered in
+distinct saturated colours from the \texttt{gist\_ncar} palette with
+a deterministic ID$\rightarrow$hue shuffle so neighbouring IDs are
+well separated. Orthoslices at the anterior commissure (world
+$(0,0,0)$\,mm). All three atlases live on the FSL MNI152 1\,mm grid,
+which is anatomically aligned to but does not share its voxel
+indexing with the ICBM 2009a template grid; each is sliced at its own
+voxel index for world $(0,0,0)$.}
+\label{fig:mni_template}
+\end{figure}
+
+\paragraph{Three additional bundled parcellations.}
+The TUBA human binding also ships three parcellations covering scopes
+that the Harvard-Oxford + Schaefer pair does not: classical
+whole-brain ROIs (AAL3), high-resolution deep-brain subcortex
+(Pauli 2017), and coarse functional networks (Yeo 2011). All three
+fetch via the same nilearn pattern except AAL3, whose upstream host
+(\texttt{www.gin.cnrs.fr}) carries a TLS-cert misconfiguration; a
+one-shot ``\texttt{curl -Lk}'' followed by \texttt{tar xzf} into the
+nilearn cache directory is documented in
+:mod:\texttt{tuba.atlases.mni152}. Fig.~\ref{fig:mni_extras} shows
+the three at sagittal/coronal/axial sections through MNI AC.
+
+\begin{itemize}
+\item {\em AAL3 (Rolls 2020, extending Tzourio-Mazoyer 2002):} 166
+  whole-brain labels covering cortex, subcortex, and cerebellum. The
+  classical ROI atlas in fMRI work since the early 2000s;
+  $\sim$15\,k citations make it the most-recognised parcellation in
+  practice even where finer Schaefer or Glasser variants exist.
+\item {\em Pauli 2017 deep-brain subcortex (Pauli et al., Sci Data
+  2018):} 16 high-resolution subcortical regions at 0.7\,mm pitch
+  (Pu, Ca, NAC, EXA, GPe, GPi, SNc, RN, SNr, PBP, VTA, VeP, HN, HTH,
+  MN, STH). The thalamic and basal-ganglia detail that
+  Harvard-Oxford lumps together as ``thalamus'' or ``putamen''
+  blocks. Useful for deep-brain TUS targets (Vim thalamus, STN,
+  nucleus accumbens, ventral pallidum) where coarser parcellations
+  give a single big blob.
+\item {\em Yeo 2011 (Yeo et al., J Neurophysiol 2011):} 7 cortical
+  functional networks (visual, somatomotor, dorsal attention, ventral
+  attention, limbic, frontoparietal, default mode). Used when the
+  target is described as a network rather than a specific gyrus.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{fig5_extra_parcellations_mni.png}
+\caption{Three additional bundled MNI-space parcellations:
+{\em column 1} AAL3 (166 cortex + subcortex + cerebellum labels);
+{\em column 2} Pauli 2017 (16 deep-brain subcortical labels at 0.7\,mm
+native pitch, mostly empty outside the basal-ganglia / thalamic
+band -- this is by design, the atlas only labels deep structures);
+{\em column 3} Yeo 2011 7-network cortical parcellation. Orthoslices
+at the anterior commissure (world $(0,0,0)$\,mm); same colour-shuffle
+convention as Fig.~\ref{fig:mni_template}. The atlases are catalogued
+in \texttt{tuba.atlases.mni152.PARCELLATIONS} alongside Harvard-Oxford
+and Schaefer; \texttt{warp\_atlases.py} iterates over the catalogue to
+produce a warped Halle-space companion for each (see
+Fig.~\ref{fig:warped_extras}).}
+\label{fig:mni_extras}
+\end{figure}
+
+\section{Orientation determination: the LAS-vs-LPS gotcha}\label{sec:orientation}
+The Halle NRRD header tags the volume as
+\texttt{space=left-posterior-superior} (LPS), the standard radiological
+convention. The actual voxel storage, however, is LAS:
+
+\begin{table}[H]
+\centering
+\caption{Halle NRRD voxel axes vs.\ their anatomical
+direction.}\label{tab:halle_axes}
+\begin{tabular}{lll}
+\toprule
+Halle voxel axis & Anatomical direction & Notes \\
+\midrule
+$+i$ (axis 0, increasing) & patient LEFT     & matches LPS header \\
+$+j$ (axis 1, increasing) & patient ANTERIOR & {\em conflicts} with LPS header (header says posterior) \\
+$+k$ (axis 2, increasing) & patient SUPERIOR & matches LPS header \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The conflict on axis~1 was verified by direct slice-viewer inspection of
+the Halle NRRD on 2026-04-28: the slice that the header claims is the
+most anterior in fact contains the foramen magnum and the occipital
+ridge; the slice the header claims is most posterior contains the
+nasal cavity and the upper jaw. The cause is unknown (a quirk of the
+upstream scanner export or NRRD writer), but the consequence is
+documented and the data is trusted over the header.
+
+Encoded canonically: the affine that maps Halle voxel indices to
+anatomically-correct RAS world\,mm is
+
+\begin{equation}
+\mathrm{halle\_affine\_to\_ras}(v) \;=\; \mathrm{diag}(-v,\; +v,\; +v,\; 1)
+\label{eq:halle_affine}
+\end{equation}
+
+where $v$ is the voxel pitch in mm. Using $\mathrm{diag}(-v,-v,+v,1)$
+(``proper LPS'' from the header) would put patient~anterior at NIfTI
+$-y$ (RAS posterior), mirror-flipping the registration and breaking
+every downstream MNI overlay. The encoded affine and the documentation
+of the empirical disambiguation both live in
+\texttt{registration/halle\_constants.py}; downstream code that writes
+or reads the Halle volume {\em must} go through this module rather than
+trusting the NRRD header field.
+
+We do not run a per-slice bone-mass orientation probe analogous to the
+mouse's. The clinical CT comes off the scanner with the patient already
+in approximate anatomical orientation, so the only ambiguity to resolve
+is the one axis-1 sign described above. The skull's gross bilateral
+symmetry plus the unambiguous superior-inferior bone-density gradient
+(cranial vault thin, basicranium thick) suffice to lock down the other
+two axes without computation.
+
+\section{Downsampling to the 1\,mm ANTs cache}\label{sec:downsample}
+The native $0.125$\,mm Halle volume is moderate at $\sim$1.6\,GB
+($\sim$820 million voxels for a typical adult skull). It is too large
+to feed to ANTs SyN directly --- the deformation field would consume
+$\sim$10\,GB at full pitch, and per-iteration cost is gradient-of-MI
+dominated which scales with the active voxel count.
+
+The pipeline therefore caches a 1\,mm Halle CT NIfTI
+(\texttt{halle\_ct\_1mm.nii.gz}) at factor-8 block-max decimation, and
+hands that to ANTs as the {\em fixed} image. Block-max (rather than
+mean) preserves cortical-bone peak intensities, so the same
+$\mathrm{HU}=700$ threshold used at native carries over to the cached
+volume without recalibration.
+
+The cache writes inherit the LAS$\rightarrow$RAS affine of
+Eq.~\ref{eq:halle_affine} at the {\em new} voxel pitch (1\,mm). All
+downstream visualisations of the warped MNI products (T1 template,
+brain mask) sit on this 1\,mm grid; the slab loader of
+\S\ref{sec:placement} samples the {\em native} $0.125$\,mm volume
+directly, so the 1\,mm cache is used only by SyN and its QC.
+
+We do not provide an intermediate 0.5\,mm cache analogous to the
+mouse's 50\,$\mu$m intermediate. The 1\,mm ANTs cache + 0.125\,mm slab
+sampler suffice for the existing case set and there is no use case for
+an in-between resolution.
+
+\section{No PCA pre-alignment}\label{sec:prealign}
+The mouse Maga pipeline rotates its native volume by PCA-derived Euler
+angles (manuscript \S5 of the mouse report; angles $(\alpha_x, \alpha_y,
+\alpha_z) = (+8.07\,^\circ, +8.40\,^\circ, -19.51\,^\circ)$ for the
+Maga 4K scan) so that all downstream caches share a clean axis-aligned
+voxel grid centred at the cortical-bone centroid.
+
+The Halle pipeline does {\em not} apply a PCA pre-alignment. The Halle
+NRRD's voxel axes after the Eq.~\ref{eq:halle_affine} sign convention
+{\em already} align with RAS to within a small (a few degrees) residual
+rotation that is well within the capture range of ANTs SyN's
+mutual-information stage. Forcing an explicit PCA pre-alignment would
+introduce an order-1 \texttt{ndimage.affine\_transform} pass that
+softens cortical-bone intensities by $\sim$25\,\% and would require
+re-anchoring the Hounsfield thresholds of \S\ref{sec:acoustic}; the
+softening is unavoidable for the mouse (whose skull sits at a large
+angle relative to the index axes) but adds cost without benefit for the
+Halle data.
+
+The TUBA convention for the human is therefore that ``world-mm''
+coordinates are in NIfTI RAS world {\em with the origin at NRRD voxel
+$(0,0,0)$, not at the bone centroid}. This is a small relaxation of
+the strict TUBA spec (mouse and macaque both centre on the bone
+centroid after PCA); the bone centroid for Halle lives at world
+$\approx (-130, +100, +100)$\,mm depending on the scan's per-subject
+position. The species module documents this and provides
+\texttt{nrrd\_voxel\_mm\_to\_halle\_ras} for legacy callers that still
+carry NRRD-voxel-mm coordinates (the only difference is a sign flip on
+the first component).
+
+A legacy landmark-based orientation refinement
+(\texttt{register\_orientation\_first.py}) exists, using a five-point
+Umeyama fit on nasion, inion, the two pre-auriculars, and the vertex.
+It is not invoked by the production pipeline because ANTs SyN handles
+the same residual orientation drift directly, and the landmark
+auto-detection produced noisier results than the SyN affine init in
+side-by-side QC. The script remains in \texttt{registration/} for
+reproducibility of historical figures but is not on the current code
+path.
+
+\section{Outer-bone-table extraction}\label{sec:surface}
+Because MNI is a head template and not a brain-only template,
+the human pipeline does not extract an endocranial cavity for
+registration: the registration is intensity-vs-intensity (\S\ref{sec:registration}),
+not mask-vs-mask. The surface mesh is needed for a {\em separate}
+purpose: bowl placement. The transducer rim sits on the outer table
+of the bone, the bowl's concave surface aims through the bone at the
+target, and the apex sits a fixed distance outside the bone. To support
+this placement geometry, the pipeline produces a dense outer-bone-table
+point cloud with per-vertex normals.
+
+Two extraction methods are available. They give noticeably different
+surfaces, and only one of them is correct for transducer placement.
+
+\subsection{Morphological close+fill ($\sim$22\,mm)}
+\label{sec:surface_closefill}
+\texttt{registration/extract\_halle\_surface.py} takes the
+$\mathrm{HU}\geq 700$ bone mask at 1\,mm working pitch, applies a 22\,mm
+morphological closing (a ball-shaped structuring element large enough
+to bridge the foramen magnum ($\sim$30\,mm), the orbital openings, and
+the choanae), fills any residual interior holes, and runs marching cubes
+to produce a triangle mesh. This recipe is the standard
+``inflate-the-skull-to-the-head-envelope'' trick used to manufacture a
+fake scalp surface from a dry-skull CT for landmark-based registration
+against an MNI head template.
+
+The output mesh ({\em halle\_outer\_surface.npz}, $\sim$50k verts +
+faces) is geometrically smooth and topologically simple, but its
+vertices sit {\em inside} the cortical bone or on the inner table.
+The 22\,mm closing intentionally inflates the bone mask to bridge the
+large foramina; the resulting boundary is the convex-hull-ish envelope
+of the bone, not the actual outer cortical surface. Using these
+vertices for transducer placement would put the rim of the bowl 1--3\,mm
+into the skull, which is not where a transducer can physically be
+mounted.
+
+The close+fill mesh is retained as the {\em fallback} input to
+\texttt{halle\_placement.py} in case the ray-cast cache below has not
+been generated, and as a registration-target proxy for the legacy
+landmark-based scripts.
+
+\subsection{Ray-cast outer table (the production path)}
+\label{sec:surface_raycast}
+\texttt{registration/extract\_outer\_bone\_surface.py} solves the
+inner-table problem by ray-casting outward from the bone-mass centroid.
+At a 1\,mm working pitch:
+
+\begin{enumerate}
+\item Compute the bone-mass centroid in storage-mm:
+$(c_L, c_P, c_S) = \mathrm{mean}(\{\mathbf{i}\,v : \mathrm{HU}(\mathbf{i})\geq 700\})\cdot v$.
+\item Sample the unit sphere uniformly via spherical coords:
+$N_\mathrm{azim}=240$ azimuth steps in $[0, 2\pi)$, $N_\mathrm{elev}=120$
+elevation steps in $[-\pi/2, +\pi/2]$, weighted by $\cos(\mathrm{elev})$
+to suppress pole bunching. Total ray count: 28\,800.
+\item For each direction $\mathbf{\hat d}$, walk outward from the
+centroid in 1-voxel steps; record the position of the {\em outermost}
+voxel along the ray whose intensity exceeds the bone threshold:
+$\mathbf{p}_\mathrm{hit} = \mathrm{argmax}_{s} \{s \,:\,
+\mathrm{HU}(\mathbf{c} + s\cdot v\cdot\mathbf{\hat d}) \geq 700\}$.
+Rays that never re-enter bone after their last hit (i.e., that exit the
+skull from the inside) are skipped.
+\item Convert the hit cloud from storage-mm to TUBA Halle RAS via
+$\mathbf{p}_\mathrm{ras} = \mathrm{diag}(-1,+1,+1)\cdot\mathbf{p}_\mathrm{hit}$.
+\item Estimate per-vertex outward normals via local PCA: at each vertex,
+find its $k=12$ nearest neighbours (cKDTree), fit a plane to the
+neighbourhood, take the smallest-eigenvector direction, and orient the
+sign so it points away from the centroid.
+\end{enumerate}
+
+The resulting NPZ ({\em halle\_outer\_bone\_surface.npz}, $\sim$24--26k
+verts and matching normals) is the production placement target. It
+captures the outer cortical surface to within $\pm 1$\,mm (the ray-step
+size), it does not bridge across foramina (the bowl can be aimed across
+the foramen magnum if needed without snapping its rim onto a virtual
+mass), and the normals point physically outward.
+
+A small fraction of rays ($\sim$1\,\%) record a hit at a stale cortical
+fragment far from the main shell --- pieces of the basicranium that
+detach from the cranial vault under the 1\,mm working-pitch
+quantisation. These appear as outliers on the rendered mesh but do
+{\em not} affect placement, because the placement helper restricts its
+candidate set to an EEG-seeded sphere ($\S$\ref{sec:placement}) within
+which the outliers do not sit.
+
+In TUBA the raycast surface extractor lives at
+\texttt{tuba.core.surface.raycast\_outer\_bone\_surface\_world\_mm};
+it accepts an explicit storage-to-world rotation/sign matrix so the
+ray-cast can be expressed in any species' aligned-native frame. The
+human species module hard-codes Eq.~\ref{eq:halle_affine} for this
+matrix.
+
+\section{ANTs SyN intensity registration}\label{sec:registration}
+The cross-modality registration matches the Halle 1\,mm CT volume
+against the MNI152 1\,mm T1 template. The grids are the same physical
+size ($\sim$1\,mm pitch, $\sim$200\,mm field of view) and largely
+overlap once axis signs are correct (\S\ref{sec:orientation}); only the
+intensity scales differ. The cost function therefore has to span the
+cross-modality gap, which mutual information handles in a way that
+sum-of-squares cannot.
+
+\paragraph{Choice of fixed and moving.}
+The Halle CT is held as the {\em fixed} image and the MNI T1 is the
+{\em moving} image:
+
+\begin{verbatim}
+ants.registration(
+    fixed=halle_ct_1mm,
+    moving=mni_icbm152_t1,
+    type_of_transform='SyN',
+    reg_iterations=(40, 20, 10),
+    aff_metric='mattes',         # Mattes mutual information
+    syn_metric='mattes',
+    syn_sampling=32,
+)
+\end{verbatim}
+
+This is the {\em opposite} convention from the mouse Maga and macaque
+NMT pipelines (which hold the atlas as fixed and the species's binary
+cavity mask as moving, with a mean-squares metric). The reason is
+practical, not principled: with the Halle CT as fixed, the warped MNI
+products (T1, brain mask) land on the {\em CT's} 1\,mm grid, which is
+the grid the slab loader uses for visual QC overlays; if MNI were
+fixed and Halle were moving, the warped CT would land on the 1\,mm MNI
+grid and a separate inverse pass would be needed for QC. The forward
+and inverse transforms returned by ANTs cover both directions equally
+either way, so the choice of which is ``fixed'' is a UX optimisation.
+
+\paragraph{Saved artefacts.}
+The forward + inverse transforms are persisted to
+\texttt{registration/ants\_transforms/} and indexed by stable text
+lists:
+
+\begin{itemize}
+\item \texttt{ants\_syn\_forward.txt}: applies image transforms in the
+  direction MNI $\rightarrow$ Halle. Used by
+  \texttt{ants.apply\_transforms} to bring MNI volumes onto the Halle
+  CT grid (the MNI brain mask and T1 template are warped this way for
+  QC).
+\item \texttt{ants\_syn\_inverse.txt}: applies image transforms
+  Halle $\rightarrow$ MNI. For point transforms (as opposed to image
+  warps) ANTs applies the spatial inverse, so to map a {\em point} from
+  MNI RAS into the Halle frame, one uses
+  \texttt{apply\_transforms\_to\_points} with the {\em inverse}
+  transform list. The placement helper takes this path.
+\end{itemize}
+
+\paragraph{Sanity probes.}
+After SyN converges, six MNI anatomical landmarks
+\big((0,0,0), $(0,86,-38)$, $(0,-113,0)$, $(0,0,90)$,
+$(-85,-15,-44)$, $(85,-15,-44)$~mm in MNI RAS for AC, nasion, inion,
+$\mathrm{Cz}$-proxy, left and right pre-auriculars\big) are warped into
+Halle LPS and printed for visual sanity-check. After the
+LAS-vs-LPS sign fix of \S\ref{sec:orientation}, AC lands at the centre
+of the bony cranium, nasion lands at the nasal-bone tip, inion lands at
+the external occipital protuberance, $\mathrm{Cz}$ lands at the cranial
+vault apex, and the pre-auriculars land at the temporal-bone external
+auditory canals. Any axis-flip remaining in the pipeline manifests as
+a $\pm 50$--$150$\,mm offset on these probes; they pass for the current
+release.
+
+\paragraph{Warped brain volume.}
+The MNI brain mask warps to a Halle brain region of approximately
+1\,446\,mL. This is within the expected range for adult human cranial
+cavities (1\,100--1\,500\,mL) and confirms the registration's
+gross scale is correct; the residual local mismatch is below the SyN
+deformation tolerance ($\sim$1--2\,mm) and is not separately
+reported. Fig.~\ref{fig:skull_atlas} overlays the warped MNI T1
+template (warm colour, masked to the warped MNI brain mask) on the
+Halle CT (bone, greyscale); the cyan contour traces the warped brain
+mask. The mask follows the inner table of the cortical bone in every
+section, with no mass-effect leakage into the orbits, the nasal cavity,
+or the foramen magnum.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{fig3_skull_atlas.png}
+\caption{Post-SyN registration QC. Native 0.125\,mm Halle CT (bone,
+greyscale) overlaid with the warped MNI T1 template (1\,mm,
+masked to the warped MNI brain mask, inferno colour map) and the
+warped brain mask (cyan contour). Orthoslices through the warped
+brain centroid. The cortical-bone boundary is rendered at native
+microCT pitch and the brain envelope (1\,mm, smoother) fills the
+endocranial cavity to within the SyN deformation tolerance
+($\sim$1--2\,mm); the cyan contour follows the inner table of the
+cortical bone in every section without leaking into the orbits, the
+nasal cavity, or the foramen magnum.}
+\label{fig:skull_atlas}
+\end{figure}
+
+ANTs SyN at this resolution completes in $\sim$3--5\,min on a single
+Threadripper core (vs.\ $\sim$70\,s for the mouse Maga binary
+registration at 25\,$\mu$m, whose deformation field is much smaller).
+
+\paragraph{Warped-atlas products.}
+After SyN converges, we additionally warp the six MNI-space
+parcellations catalogued in
+\texttt{tuba.atlases.mni152.PARCELLATIONS} (the three primary atlases
+of \S\ref{sec:atlas} plus the three extras of
+Fig.~\ref{fig:mni_extras}) through the saved forward transform list
+using nearest-neighbour interpolation (preserves integer label IDs).
+Each parcellation lives on a slightly different MNI grid from the
+ICBM 2009a template; ANTs resamples in physical world coordinates so
+the source-grid mismatch is handled internally. The three primary
+warped products land on the Halle 1\,mm grid as
+\texttt{harvard\_oxford\_117\_in\_halle.nii.gz} (117 labels),
+\texttt{schaefer\_400\_7nets\_in\_halle.nii.gz} (400 labels), and
+\texttt{schaefer\_1000\_7nets\_in\_halle.nii.gz} (1\,000 labels). The
+extras land as \texttt{aal3\_in\_halle.nii.gz} (166 labels),
+\texttt{pauli\_2017\_in\_halle.nii.gz} (16), and
+\texttt{yeo\_7nets\_in\_halle.nii.gz} (7); the catalogue-iterating
+\texttt{warp\_atlases.py} produces all six in a single pass.
+Fig.~\ref{fig:warped_atlases} overlays all three on the native
+$0.125$\,mm Halle bone. The labels are coarse compared to the bone
+(1\,mm warp grid vs.\ $0.125$\,mm bone) but the cortical envelope of
+each parcellation conforms to the inner table of the cortical bone in
+every section; no region leaks through the cortical shell into the
+extracranial space or through the foramen magnum. The 117-vs-400-
+vs-1\,000 granularity progression is visible at native bone scale:
+Harvard-Oxford gives lobar-level patches, Schaefer 400 gives
+gyrus-level patches that follow the actual Halle anatomy, Schaefer
+1\,000 resolves cortical mini-clusters that span only a few mm.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{fig4_warped_atlases_on_halle.png}
+\caption{Three MNI-space parcellations warped through the SyN
+transform onto the native Halle CT (the mouse-manuscript Fig.~6
+analogue). {\em Column 1}: bare Halle bone (greyscale, native
+0.125\,mm) with the warped MNI brain mask drawn as a cyan contour.
+{\em Columns 2--4}: same bone with the warped Harvard-Oxford,
+Schaefer~400, and Schaefer~1\,000 labels overlaid at $\alpha=0.7$.
+Orthoslices through the warped brain centroid. The label volumes are
+at 1\,mm (the ANTs warp grid); the bone is at native 0.125\,mm so the
+cortical-bone boundary stays sharp.
+\\[2pt]
+{\em On the apparent coverage gaps.} The labels do not cover the full
+brain mask volume in any of columns 2--4, and the bone shows through
+where they are absent. This is a parcellation-coverage property, not a
+registration error. Numerically, 99.1\,\% of Harvard-Oxford labels sit
+inside the warped MNI brain mask (0.9\,\% are edge artefacts; 13.3\,\%
+of the brain mask is correctly unlabeled white matter and
+brain-stem-boundary tissue that Harvard-Oxford simply does not
+parcellate); 99.4\,\% of Schaefer~400 labels sit inside the brain mask
+(the Schaefer construction is cortical-only, so the entire subcortex,
+cerebellum, and brainstem are unlabelled by design). One additional
+caveat: the FSL atlases live on the MNI152NLin6Asym grid while the SyN
+transforms were learned from the ICBM~2009a template (\S\ref{sec:atlas}),
+so warped labels carry a few-millimetre residual offset relative to the
+ICBM-aligned brain mask --- below SyN deformation tolerance but visible
+in the highest-resolution Schaefer~1\,000 boundaries. Use the
+highest-resolution parcellation that the downstream analysis actually
+requires: Harvard-Oxford for lobar-level region averages, Schaefer~400
+for network-aligned gyrus patches, Schaefer~1\,000 when sub-gyral
+detail matters.}
+\label{fig:warped_atlases}
+\end{figure}
+
+\paragraph{Warped extras (AAL3, Pauli, Yeo) on the Halle skull.}
+Fig.~\ref{fig:warped_extras} overlays each of the three extras on the
+native 0.125\,mm Halle bone (same layout as
+Fig.~\ref{fig:warped_atlases}). The Pauli column makes the deep-brain
+detail visible directly on the native CT: the bilateral putamen and
+caudate flank the lateral ventricles, the substantia nigra and
+subthalamic nucleus sit ventral to the thalamus, and the nucleus
+accumbens occupies its ventromedial position --- structures that the
+Harvard-Oxford column of Fig.~\ref{fig:warped_atlases} aggregates into
+a single ``Right Caudate / Right Putamen'' block. The Yeo column shows
+the seven canonical networks as large cortical strips that fall
+neatly inside the inner table of the bone.
+
+\paragraph{AAL3 brain-envelope masking.}
+AAL3 is the only one of the six bundled parcellations whose native
+source is intrinsically L/R-asymmetric ($\sim$8\,\% more
+right-hemisphere voxels than left, concentrated in the lateral
+temporal lobe and right Crus 2). After warping into Halle the R-side
+overhang spills past the warped MNI brain mask and into the cortical
+bone shell: pre-fix, 1.7\,\% of AAL3 label voxels overlapped the
+$\mathrm{HU}>700$ bone region and 3.7\,\% sat outside the brain mask
+entirely, with 90\,\% of the overlap on the patient-R side. To bring
+AAL3 in line with the other parcellations (all $\leq 0.2\,\%$ bone
+overlap) we apply a post-warp brain-envelope masking step:
+$\mathrm{aal3\_in\_halle}[\,\mathrm{brain\_mask} = 0\,] \leftarrow 0$.
+This removes 42\,039 voxels (3.7\,\% of the pre-mask total) and brings
+the bone-overlap fraction down to 0.19\,\% and the L/R asymmetry to
+$-0.8\,\%$ (near-symmetric).
+
+The masking is gated by a per-atlas flag
+(\texttt{Parcellation.mask\_to\_brain\_envelope}) so it applies only
+to AAL3 and is idempotent under re-running
+\texttt{warp\_atlases.py}. Adding a future atlas with similar L/R
+asymmetry (e.g., Glasser HCP-MMP1 if BALSA-fetched and resampled to
+MNI) is a one-line catalogue addition; the warp script picks up the
+flag without modification.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{fig6_extra_parcellations_on_halle.png}
+\caption{Three additional warped parcellations on the native Halle CT
+(same layout as Fig.~\ref{fig:warped_atlases}). {\em Column 1}: bare
+0.125\,mm Halle bone with the warped MNI brain mask in cyan.
+{\em Columns 2--4}: warped AAL3 (166 labels, whole-brain;
+brain-envelope-masked --- see paragraph above), Pauli 2017
+(16 deep-brain subcortical), Yeo 2011 (7 cortical functional
+networks) overlaid at $\alpha=0.7$. The Pauli column gives the
+deep-brain detail useful for Vim, STN, NAc, and pallidum TUS
+targeting; the Yeo column gives the network-level framing useful for
+default-mode / salience / dorsal-attention TUS protocols. Post-mask,
+all three extras have $\leq 0.2\,\%$ label voxels overlapping bone
+(matching Harvard-Oxford); Pauli is intrinsically at $0\,\%$ because
+its labels stop well inside the brain mask. A few-mm offset from the
+FSL-vs-ICBM grid mismatch remains visible at the highest resolution
+for atlases on the FSL MNI152NLin6Asym grid.}
+\label{fig:warped_extras}
+\end{figure}
+
+\section{Acoustic-property mapping}\label{sec:acoustic}
+The Hounsfield calibration of the Halle volume permits an
+{\em absolute}, deterministic piecewise-linear ramp from intensity to
+acoustic properties $(c, \rho)$, with no reliance on histogram modes
+the way the mouse pipeline must (which has no HU calibration). Both
+endpoints are anchored on published cortical-bone literature:
+
+\begin{table}[H]
+\centering
+\caption{Halle intensity-to-acoustic ramp (linear interpolation between
+endpoints; clipped at $\mathrm{HU}\leq I_\mathrm{low}$ to water,
+clipped at $\mathrm{HU}\geq I_\mathrm{high}$ to cortical
+bone).}\label{tab:acoustic}
+\begin{tabular}{lll}
+\toprule
+Anchor & Intensity (HU) & $(c, \rho)$ \\
+\midrule
+$I_\mathrm{low}$  & 700  & $(1540\,\mathrm{m\,s^{-1}}, 1000\,\mathrm{kg\,m^{-3}})$ \\
+$I_\mathrm{high}$ & 1973 & $(2900\,\mathrm{m\,s^{-1}}, 2200\,\mathrm{kg\,m^{-3}})$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+$I_\mathrm{low}=700$\,HU is the standard radiological lower bound of
+cortical bone in soft-tissue-windowed clinical CT; cancellous bone
+sits slightly below, marrow and trabeculae below that. Setting
+$c$ and $\rho$ to water-equivalent here (rather than soft-tissue
+intermediate values) is consistent with the Maga matched-fluid coupling
+assumption: voxels below the bone threshold are treated as a continuum
+of acoustic water, and any remaining soft-tissue contribution to the
+focal field is captured by the downstream brain-attenuation block of
+\texttt{validate\_transcranial.skull\_to\_phase\_screens}.
+
+$I_\mathrm{high}=1973$\,HU is the upper endpoint of the Halle cortical-
+bone distribution, calibrated empirically against the highest-intensity
+voxel population in this scan. The literature endpoint at $(2900,
+2200)$\,m\,s$^{-1}$ / kg\,m$^{-3}$ is bound to this scan's HU mode rather
+than to a numerically arbitrary saturation value, mirroring the design
+discipline of the mouse pipeline (\S8 of the mouse report); the
+difference is that for the human we get the HU calibration ``for
+free'' from the scanner, while the mouse had to choose the cortical
+histogram mode by hand. The mouse uses
+$\rho_\mathrm{bone}=1900$\,kg\,m$^{-3}$ (the conservative DigiMouse
+literature value); the human uses $2200$\,kg\,m$^{-3}$, slightly higher
+to match the HU-calibrated cortical density.
+
+Voxels in $[I_\mathrm{low}, I_\mathrm{high}]$ interpolate linearly
+between the two endpoints. The dry-skull cavity of the Halle release
+contains air and is below $I_\mathrm{low}$; it is therefore mapped to
+water without any explicit cavity-infill step. For live-subject
+clinical CT (which the Halle pipeline could in principle ingest with
+no code change beyond the source path), the cavity would contain brain
+parenchyma at $\mathrm{HU}\approx 30$--$50$, still below $I_\mathrm{low}$,
+so the same ramp maps it to water --- consistent with how acoustic
+solvers usually treat brain parenchyma in transcranial simulations at
+clinical frequencies (250\,kHz--1\,MHz).
+
+The ramp is implemented in
+\texttt{tuba.core.slab.IntensityToAcousticRamp}, bound by the human
+species module as
+
+\begin{verbatim}
+SLAB_RAMP = IntensityToAcousticRamp(
+    i_low=700.0, i_high=1973.0,
+    c_water=1540.0, rho_water=1000.0,
+    c_bone_max=2900.0, rho_bone_max=2200.0,
+)
+\end{verbatim}
+
+so the slab loader of \S\ref{sec:placement} produces $(c\_map,
+\rho\_map)$ at the slab's sampling pitch with no further setup.
+
+\paragraph{Attenuation.}
+We carry over the frequency-power-law model from the Maga pipeline
+unchanged: $\alpha_\mathrm{bone} = 8$\,dB\,cm$^{-1}$\,MHz$^{-1}$,
+$\alpha_\mathrm{brain} = \alpha_\mathrm{tissue} =
+0.5$\,dB\,cm$^{-1}$\,MHz$^{-1}$, with linear frequency dependence
+($\alpha \propto f$). At a typical clinical 0.5\,MHz the per-mm
+cortical-bone attenuation is $\sim$0.4\,dB; for a 5--10\,mm bone
+traverse this is 2--4\,dB and dominates the transcranial loss budget
+together with the impedance-mismatch reflections at the bone
+interfaces.
+
+\section{Placement: perpendicular-to-skull bowl
+geometry}\label{sec:placement}
+The placement helper takes (i) an anatomical target name resolving to
+an MNI RAS coordinate, (ii) optionally an EEG-site name resolving to a
+second MNI RAS coordinate, (iii) a focal length $F$\,(mm), and (iv) a
+bowl aperture radius $R$\,(mm); it returns the bowl apex position,
+the inward beam direction, and a 3D orthonormal beam basis. The
+output is in TUBA Halle RAS world\,mm.
+
+\paragraph{Coordinate-chain.}
+For each input MNI RAS coord (target, EEG site) the helper applies the
+chain
+\begin{align}
+\mathrm{MNI\,RAS} &\xrightarrow{(-,-,+)} \mathrm{MNI\,LPS} \nonumber\\
+&\xrightarrow{\texttt{ants.apply\_transforms\_to\_points(inv)}}
+   \mathrm{Halle\,LPS} \nonumber\\
+&\xrightarrow{(-,-,+)} \mathrm{Halle\,RAS\,world\,mm}\label{eq:coord_chain}
+\end{align}
+where the first and last steps negate the first two components and the
+middle step applies ANTs' inverse transform (since for points the
+spatial inverse of the image registration applies). This is the
+canonical TUBA convention for the intensity-mode atlas binding:
+{\em images} use the saved forward transform list to go atlas $\rightarrow$
+subject; {\em points} use the inverse list to go atlas $\rightarrow$ subject.
+
+\paragraph{Surface candidate set.}
+The outer-bone-table point cloud and per-vertex normals
+(\S\ref{sec:surface_raycast}) are loaded once into a cKDTree and cached.
+If an EEG seed is supplied, candidate vertices are restricted to those
+within \texttt{eeg\_search\_radius\_mm} of the warped seed
+($10$\,mm by default; widens to $20$\,mm if fewer than $50$ candidates
+are found inside the initial radius). Without an EEG seed, all $\sim$25k
+vertices are candidates.
+
+\paragraph{Perpendicular fit.}
+For each candidate vertex $\mathbf{p}_i$ with outward normal $\mathbf{n}_i$,
+the perpendicular distance from the inward-normal line
+$\{\mathbf{p}_i + s(-\mathbf{n}_i)\,:\,s\in\mathbb{R}\}$ to the target
+$\mathbf{T}$ is
+\begin{equation}
+d_i = \big\|\,(\mathbf{p}_i - \mathbf{T}) -
+          \big[(\mathbf{p}_i - \mathbf{T}) \cdot (-\mathbf{n}_i)\big](-\mathbf{n}_i)\,\big\|
+\end{equation}
+We additionally require the target to be ``in front'' of the
+transducer --- the dot product $(\mathbf{p}_i - \mathbf{T})\cdot(-\mathbf{n}_i)
+< 0$ --- which excludes candidates on the opposite side of the head
+that happen to have a normal nearly parallel to the target direction.
+The selected vertex is the one minimising $d_i$ among in-front
+candidates.
+
+\paragraph{Bowl geometry.}
+The selected vertex is the bowl rim contact. The bowl apex sits
+$h$\,mm outside the bone along $-\mathrm{beam}$, where
+\begin{equation}
+h \;=\; F \;-\; \sqrt{F^2 - R^2}
+\end{equation}
+is the geometric depth of a spherical-cap bowl of focal length $F$ and
+aperture radius $R$. For the default $(F, R) = (30, 15)$\,mm,
+$h = 4.02$\,mm. The focal point sits at apex~$+ F\cdot\mathrm{beam}$,
+typically $\sim$0--3\,mm from the warped MNI target (since the bowl rim
+is constrained to the outer skull, not to a sphere of radius $F$ around
+the target; the perpendicular-fit residual $d_\mathrm{best}$ is the
+target-to-beam-axis miss).
+
+\paragraph{Output basis.}
+The placement helper returns a full 3D orthonormal frame:
+$\mathbf{n}_3 = \mathbf{\hat b}$ (the inward beam direction),
+$\mathbf{t}_3$ orthogonalised against $\mathbf{n}_3$ from the seed
+$(1,0,0)$ if the beam is not nearly L-axis-aligned else from $(0,1,0)$,
+$\mathbf{b}_3 = \mathbf{n}_3 \times \mathbf{t}_3$. A legacy 2D
+projection $(n_\mathrm{LP}, t_\mathrm{LP})$ in the LP plane is also
+included for back-compatibility with older slab consumers.
+
+In TUBA the placement helper lives at
+\texttt{tuba.core.placement.place\_perpendicular\_to\_surface}; the
+human species module's \texttt{place\_on\_skull} wraps it with the MNI
+target lookup, the EEG site lookup, the coordinate-chain of
+Eq.~\ref{eq:coord_chain}, and back-compat keys carrying the
+NRRD-voxel-mm coordinates for legacy callers.
+
+\paragraph{Sample placement: CP3 $\rightarrow$ S1\_left.}
+A representative case in default geometry: target \texttt{S1\_left} at
+MNI RAS $(-40, -25, 55)$, EEG seed \texttt{CP3} at MNI RAS
+$(-55.9, -44.5, 56.8)$, $F=30$\,mm, $R=15$\,mm,
+\texttt{eeg\_search\_radius\_mm}~$=10$\,mm. The resolved Halle-RAS
+quantities are listed in Table~\ref{tab:placement_sample}.
+
+\begin{table}[H]
+\centering
+\caption{Resolved Halle placement for CP3 $\rightarrow$
+S1\_left.}\label{tab:placement_sample}
+\begin{tabular}{ll}
+\toprule
+Quantity & Value (Halle RAS world\,mm) \\
+\midrule
+S1\_left (warped target)        & $(-109.5,\, +82.3,\, +133.9)$ \\
+CP3 (warped EEG seed)           & $(-145.5,\, +66.2,\, +138.8)$ \\
+Bowl rim on bone                & $(-126.1,\, +72.9,\, +149.9)$ \\
+Bowl apex (source plane)        & $(-128.8,\, +71.8,\, +152.7)$ \\
+Inward beam direction           & $(+0.665,\, +0.276,\, -0.694)$ \\
+Bowl depth $h$                  & $4.02$\,mm \\
+Perpendicular residual          & $2.79$\,mm \\
+Apex-to-target distance         & $29.0$\,mm \\
+EEG-seed-to-placement offset    & $19.7$\,mm \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The apex-to-target distance ($29.0$\,mm) is within $1$\,mm of the
+focal length ($30$\,mm), so the geometric focus and the anatomical
+target coincide to within $\sim$$1$\,mm at this placement; the
+perpendicular residual ($2.79$\,mm) is the off-axis miss of the beam
+axis from the target. The EEG-seed-to-placement offset is large
+($19.7$\,mm) because the CP3 location is on scalp and the bowl rim is
+on bone, but the rim is on the skull region under CP3 (the lateral
+parietal vault) within the EEG-constrained search radius.
+
+\section{Slab loader and acoustic-property maps}\label{sec:slab}
+Given a placement (apex, beam direction) and a slab size (lateral,
+elevation, depth in metres) and pitch $\Delta x$, the slab loader
+samples the {\em native} 0.125\,mm Halle NRRD on a beam-aligned grid:
+
+\begin{itemize}
+\item Slab origin is the apex (i.e., $z=0$ at the source plane).
+\item Slab axes are lateral $(\mathbf{t}_1)$ and elevation $(\mathbf{t}_2)$
+  orthogonal to the beam, built by Gram-Schmidt from a helper seed of
+  $(0,0,1)$ unless the beam is near-vertical
+  ($|\mathrm{beam}_z| > 0.9$), in which case $(1,0,0)$.
+\item Sampling is via
+  \texttt{scipy.interpolate.RegularGridInterpolator} on the Halle NRRD,
+  with world-axis arrays built from Eq.~\ref{eq:halle_affine} so that
+  axis 0 ranges monotonically downward from $0$ (axis 0 of the NRRD is
+  patient-L, which TUBA-Halle-RAS sees as $-x$).
+\item Intensities are passed through the ramp of
+  Table~\ref{tab:acoustic} to produce $(c\_map, \rho\_map)$ at the slab
+  pitch.
+\item No cavity-infill step is applied (\S\ref{sec:acoustic}): the
+  dry-skull cavity is at HU below $I_\mathrm{low}$ and the ramp maps it
+  to water.
+\end{itemize}
+
+The slab loader and the placement helper both live in TUBA's
+\texttt{tuba.species.human} module; downstream callers (the
+angular-spectrum solver, the validation-report builder) consume the
+returned $(c\_map, \rho\_map, dz\_slab, frame)$ tuple identical in
+shape to the mouse and macaque loaders.
+
+\section{TUBA migration and lessons carried from the mouse case}
+\label{sec:tuba}
+TUBA (Transcranial Ultrasound Brain Atlas) is a unifying library that
+exposes the four-stage pipeline --- orientation $\rightarrow$ align
+$\rightarrow$ surface/cavity $\rightarrow$ ANTs SyN --- as
+species-agnostic primitives in \texttt{tuba.core}, with thin species
+modules under \texttt{tuba.species} that bind numerics (voxel size,
+thresholds, atlas) to one of three references (mouse Allen CCFv3,
+macaque NMT v2, human MNI152). The human module is
+\texttt{tuba.species.human}; its core dependencies are
+\texttt{tuba.core.\{surface, warp, placement, slab\}} plus
+\texttt{tuba.atlases.mni152}.
+
+\subsection{Three design choices carried forward unchanged}
+\begin{itemize}
+\item {\em ANTs convention frozen.} For the mouse and macaque, the
+  registration is
+  \texttt{ants.registration(fixed=atlas\_mask, moving=cavity\_mask)};
+  for the human it is
+  \texttt{ants.registration(fixed=halle\_ct, moving=mni\_t1)}. In both
+  cases image forward transforms bring the {\em moving} image onto the
+  {\em fixed} grid, and image inverse transforms reverse the
+  direction; point transforms via
+  \texttt{ants.apply\_transforms\_to\_points} apply the spatial inverse
+  of the corresponding image warp. Users of TUBA interact only with the
+  helpers \texttt{warp\_atlas\_image\_into\_subject\_via\_fwd} (human)
+  / \texttt{warp\_atlas\_into\_subject} (mouse, macaque) and never
+  with raw forward/inverse transform lists.
+\item {\em Drive calibration post-hoc.} All three species' acoustic
+  forward simulations are run at unit drive $p_0=1$\,Pa and rescaled
+  in post to hit a free-field-equivalent peak-negative pressure
+  target (typically MI~$=1.9$ for mouse 15\,MHz, lower for human
+  clinical frequencies). Relative skull transmission drops out as the
+  unit-drive focal-pressure ratio in dB, independent of the calibration
+  target.
+\item {\em World-mm everywhere.} The slab loader and placement helper
+  in all three species take apex and beam coordinates in world\,mm in
+  the species' aligned-native frame, never in voxel\,mm. For the
+  mouse and macaque this is the bone-centroid-centred RAS frame
+  defined by PCA pre-alignment (\S5 of the mouse manuscript); for the
+  human this is the NIfTI-RAS frame defined by Eq.~\ref{eq:halle_affine}
+  with origin at the NRRD corner (no PCA).
+\end{itemize}
+
+\subsection{Three design choices that diverge from the mouse case}
+\begin{itemize}
+\item {\em Cavity-binary vs.\ intensity SyN.} The Allen CCFv3 ships a
+  clean brain mask at $10$ and $25$\,$\mu$m, so the mouse pipeline
+  binarises the Halle cavity at $\mathrm{BONE\_LOW}=5000$ counts and
+  registers binary-to-binary with a mean-squares cost. The MNI152
+  template ships only as a T1 intensity volume + a separately-derived
+  brain mask; the natural Halle counterpart is the HU-windowed CT, not
+  a binary cavity. Intensity-mode SyN with mutual information handles
+  the cross-modality cost; the binary path is not available without
+  manufacturing a Halle cavity mask that has no use elsewhere in the
+  pipeline.
+\item {\em Cavity centroid vs.\ outer table for placement.} The mouse
+  helper picks the dorsal-most outer-bone-surface point within a 3\,mm
+  cylinder around the target's (x, y) projection, then lifts it along
+  $+z$ to satisfy a scalp-clearance or apex-to-target constraint.
+  This is appropriate for a small mouse skull where ``dorsal'' is
+  unambiguous. For the human, the head is large enough that
+  ``dorsal'' is the wrong concept: a transducer placed on the side of
+  the head (CP3, T3, F3) is not dorsal, but is still a valid
+  transcranial placement. The perpendicular-fit placement of
+  \S\ref{sec:placement} is invariant to the gross head orientation: it
+  picks the surface vertex whose inward normal best aims at the target,
+  not the surface vertex highest along any fixed world axis.
+\item {\em No PCA pre-alignment.} The Maga 4K skull arrived in its
+  scanner-axes coordinate frame, tilted $\sim$8--20$^\circ$ from RAS in
+  all three Euler angles; the macaque AMNH skull similarly. The Halle
+  CT, being a clinical-CT acquisition with the patient in approximate
+  anatomical orientation, sits within a few degrees of RAS in
+  storage. ANTs SyN's affine initialisation can absorb this residual
+  rotation directly. The cost of a pre-alignment pass (order-1
+  interpolation that softens cortical-bone intensities, re-anchoring of
+  the acoustic ramp endpoints) outweighs the benefit; we skip it.
+\end{itemize}
+
+\subsection{One coordinate-frame migration commit}
+The legacy Halle pipeline returns placement coordinates in
+NRRD-voxel-mm: positions $(i\cdot v, j\cdot v, k\cdot v)$ where $i, j,
+k$ are the NRRD's LAS-encoded storage indices. The TUBA convention is
+Halle RAS world\,mm: positions $(-i\cdot v, +j\cdot v, +k\cdot v)$.
+The migration is therefore a sign flip on the first component
+(\texttt{tuba.species.human.nrrd\_voxel\_mm\_to\_halle\_ras}).
+Placement positions, beam directions, surface vertices, and surface
+normals all migrate by the same sign flip.
+
+The slab basis $(\mathbf{t}_1, \mathbf{t}_2)$ does {\em not} migrate
+trivially. The Gram-Schmidt seed is $(0,0,1)$ in both frames (it
+points to $+S$ in both), but the cross product
+$\mathbf{t}_1 = \mathrm{beam} \times \mathrm{helper}$ is a pseudo-vector
+under reflections: computing the same cross product in two
+right-handed coordinate systems related by a sign flip on one axis
+yields {\em opposite} physical $\mathbf{t}_1$ directions. The TUBA
+Halle-RAS slab is therefore the {\em physical mirror} of the legacy
+NRRD-voxel-mm slab along the lateral ($\mathbf{t}_1$) axis:
+$c_\mathrm{map}^\mathrm{TUBA}[i_\mathrm{lat}, j, k] =
+ c_\mathrm{map}^\mathrm{legacy}[n_\mathrm{lat}-1-i_\mathrm{lat}, j, k]$.
+The beam direction is the same physical direction in both frames (one
+is the negative of the other in the first component, matching the
+axis-sign flip); $\mathbf{t}_2 = \mathrm{beam} \times \mathbf{t}_1$
+inherits the mirror from $\mathbf{t}_1$ and ends up identical in
+physical direction (two pseudo-vector operations compose to a true
+vector). The acoustic focal-pressure prediction is unchanged on-axis;
+off-axis sidelobes are mirrored.
+
+The regression test of the TUBA port checks both: (i) placement and
+beam coordinates match the legacy values exactly after the sign-flip
+conversion (max $|\Delta| = 0$ across all 11 positional/scalar fields
+on the CP3$\rightarrow$S1\_left case), (ii) the slab $c\_map$ and
+$\rho\_map$ match the legacy outputs to numerical tolerance after the
+mirror $[\,::-1, :, :]$ along axis 0 (max $|\Delta c| = 2.4\times
+10^{-4}$\,m\,s$^{-1}$ over a 0.5\,mm-pitch slab of $80\times 80\times
+160$ voxels; the residual is round-off from the cross-product
+re-ordering, well below visible scale).
+
+\subsection{Lessons specific to the human migration}
+Three points proved decisive in the porting work and should be carried
+forward to any future clinical-CT case:
+
+\begin{itemize}
+\item {\em Trust the data, not the NRRD header.} The Halle release tags
+  the volume as LPS but stores it as LAS. The disambiguation must be
+  done empirically (slice-viewer inspection) and the result baked into
+  a constant module (\texttt{halle\_constants.py}); downstream code
+  must not re-derive the storage convention from the header.
+\item {\em Outer table $\neq$ outer envelope.} The morphological
+  close+fill envelope of \S\ref{sec:surface_closefill} is correct for
+  registration-target generation against a head template, but it sits
+  on the inner table of the bone after the 22\,mm closing inflates
+  the bone mask. Placement must use the ray-cast outer table
+  (\S\ref{sec:surface_raycast}), which records the outermost hit
+  along each ray and is geometrically the boundary at which a
+  transducer would physically sit.
+\item {\em The slab basis is not canonically determined.} The
+  $\mathbf{t}_1$ direction depends on the cross-product order and is
+  therefore handedness-sensitive; identical physical placements
+  produce mirror-flipped slabs in coordinate systems related by a
+  reflection. Downstream consumers that depend on the slab basis (the
+  angular-spectrum solver's per-pixel field) must either be told the
+  handedness or applied to both mirror variants of the same physical
+  placement and the symmetric ones declared equivalent.
+\item {\em Intrinsic source-atlas asymmetry can leak past the brain
+  mask after warping.} The bone-overlap diagnostic in
+  \S\ref{sec:registration} caught AAL3 spilling 1.7\,\% of its label
+  voxels into the cortical bone shell, 90\,\% of it on the patient-R
+  side --- not a registration error, just AAL3's native R-biased
+  bounding box (8\,\% more right-side voxels in its MNI source).
+  Mitigation is a post-warp brain-envelope mask gated by a per-atlas
+  flag (\texttt{Parcellation.mask\_to\_brain\_envelope=True}); other
+  atlases stop well inside the brain mask and don't need it. The
+  rule of thumb for adding a new parcellation: warp it, run the
+  bone-overlap diagnostic, and turn the flag on if the overlap
+  exceeds $\sim 0.5\,\%$.
+\end{itemize}
+
+\subsection{Items left for future work}
+\begin{itemize}
+\item {\em Live-subject CT.} The pipeline accepts any HU-calibrated
+  clinical CT in NIfTI or NRRD form by changing the source path in
+  \texttt{tuba.species.human.NRRD\_PATH}; nothing else needs to be
+  re-tuned. The validation against a live-subject scan (with brain
+  parenchyma actually present in the cavity, scalp present outside
+  the skull) is straightforward to set up but has not been executed.
+\item {\em Optional PCA pre-alignment.} For clinical CT acquisitions
+  that arrive in non-RAS orientation (e.g., axial scans with the
+  patient tilted), the mouse-style PCA pre-alignment could be enabled
+  as a pre-processing pass without touching the rest of the pipeline.
+  The threshold would need to be set to HU $\approx$ 700 rather than
+  the mouse's uint16 30\,000, but the algorithm is unchanged.
+\item {\em Bilateral target sweep.} The
+  \texttt{validation\_report\_human\_sweep} dataset uses
+  \texttt{ANATOMICAL\_TARGETS\_MNI} entries for 20+ targets, each
+  driving an independent placement and a per-case validation report.
+  A cross-case figure summarising the focal-spot metrics (lateral and
+  axial FWHM, $-6$\,dB volume, intracranial PNP) across targets and
+  EEG sites would close the loop with the mouse manuscript's
+  Table~3-style focal-prediction comparison; this is generation-side,
+  not algorithm-side, and is left to the validation-report builder.
+\end{itemize}
+
+\begin{thebibliography}{99}
+\bibitem{halle_zenodo}
+Halle skull microCT release, Anatomical Institute Halle, Zenodo.
+Accessed 2026-04 via \texttt{setup/fetch\_halle\_skull.py}.
+\bibitem{fonov2009}
+V.~Fonov, A.~C.~Evans, K.~Botteron, C.~R.~Almli, R.~C.~McKinstry,
+D.~L.~Collins, and the Brain Development Cooperative Group,
+``Unbiased average age-appropriate atlases for pediatric studies,''
+{\em NeuroImage} {\bf 54}(1), 313--327 (2011).
+The ICBM 2009a non-linear symmetric template is the adult endpoint
+of the same construction pipeline.
+\bibitem{jurcak2007}
+V.~Jurcak, D.~Tsuzuki, and I.~Dan,
+``10/20, 10/10, and 10/5 systems revisited: their validity as
+relative head-surface-based positioning systems,''
+{\em NeuroImage} {\bf 34}(4), 1600--1611 (2007).
+\bibitem{harvardoxford}
+The Harvard-Oxford cortical and subcortical structural atlases,
+distributed with FSL (FMRIB Software Library) and accessed via
+\texttt{nilearn.datasets.fetch\_atlas\_harvard\_oxford}. Cortical
+parcellation: Desikan~et~al.\ 2006; subcortical: included with
+FSL by the Center for Morphometric Analysis (CMA).
+\bibitem{schaefer2018}
+A.~Schaefer, R.~Kong, E.~M.~Gordon, T.~O.~Laumann, X.-N.~Zuo,
+A.~J.~Holmes, S.~B.~Eickhoff, and B.~T.~T.~Yeo,
+``Local-global parcellation of the human cerebral cortex from
+intrinsic functional connectivity MRI,''
+{\em Cerebral Cortex} {\bf 28}(9), 3095--3114 (2018).
+Accessed via \texttt{nilearn.datasets.fetch\_atlas\_schaefer\_2018}.
+\bibitem{maga_manuscript}
+G.~F.~Pinton, ``Migrating the 15\,MHz transcranial mouse pipeline
+from DigiMouse to the Maga (UW) 4K microCT: orientation, cavity
+extraction, and focal-prediction validation,''
+\texttt{tuba/docs/mouse/manuscript.pdf} (companion report).
+\end{thebibliography}
+
+\end{document}
