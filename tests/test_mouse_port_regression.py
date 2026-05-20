@@ -5,8 +5,14 @@ surface, placement geometry, slab sampler) against the existing cached
 files in ``mouse_therapy/registration/``. Compares output dicts and
 arrays for bit-identity.
 
+Each test self-skips when ``TUBA_LEGACY_MOUSE_REG`` is unset so CI
+(or any host without staged legacy data) can run the file without
+INTERNALERROR during pytest collection.
+
 Run from the TUBA project root:
     PYTHONPATH=src python tests/test_mouse_port_regression.py
+or via pytest:
+    PYTHONPATH=src pytest tests/test_mouse_port_regression.py -v
 """
 import os
 import sys
@@ -14,26 +20,30 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TUBA_SRC = os.path.join(HERE, '..', 'src')
-# LEGACY_REG points at the original mouse_therapy/registration/ checkout
-# that TUBA was ported from. Set ``TUBA_LEGACY_MOUSE_REG`` to its path
-# to run the bit-identity regression; the test self-skips otherwise.
 LEGACY_REG = os.environ.get('TUBA_LEGACY_MOUSE_REG', '')
 sys.path.insert(0, TUBA_SRC)
 
-if not LEGACY_REG or not os.path.isdir(LEGACY_REG):
-    print('SKIP: set TUBA_LEGACY_MOUSE_REG to the legacy '
-          'mouse_therapy/registration directory to run this regression.')
-    sys.exit(0)
-sys.path.insert(0, LEGACY_REG)
 
-# Point the TUBA species module at the same legacy directory so it
-# reads the warped Allen products and SyN transforms produced by
-# the legacy pipeline. Set BEFORE importing tuba.species.mouse.
-os.environ.setdefault('TUBA_MOUSE_REG_DIR', LEGACY_REG)
-
-from tuba.species import mouse as tuba_mouse
-import maga_placement as legacy_placement
-import maga_skull_slab_3d as legacy_slab
+def _load_legacy():
+    """Return ``(tuba_mouse, legacy_placement, legacy_slab)`` after
+    pointing the TUBA species module at the legacy registration cache,
+    or print a skip message and return ``None`` when legacy data is
+    unavailable on this host."""
+    if not LEGACY_REG or not os.path.isdir(LEGACY_REG):
+        print('  SKIP: set TUBA_LEGACY_MOUSE_REG to the legacy '
+              'mouse_therapy/registration directory to run this regression.')
+        return None
+    if LEGACY_REG not in sys.path:
+        sys.path.insert(0, LEGACY_REG)
+    os.environ.setdefault('TUBA_MOUSE_REG_DIR', LEGACY_REG)
+    # Re-import after env var is set so module-level paths pick it up.
+    for mod in list(sys.modules):
+        if mod.startswith('tuba'):
+            del sys.modules[mod]
+    from tuba.species import mouse as tuba_mouse
+    import maga_placement as legacy_placement
+    import maga_skull_slab_3d as legacy_slab
+    return tuba_mouse, legacy_placement, legacy_slab
 
 
 def _compare_placements(label, tuba_p, legacy_p):
@@ -56,6 +66,10 @@ def _compare_placements(label, tuba_p, legacy_p):
 
 def test_placement_cavity_centre():
     print('\n=== test_placement_cavity_centre ===')
+    cfg = _load_legacy()
+    if cfg is None:
+        return True
+    tuba_mouse, legacy_placement, _ = cfg
     tuba_p = tuba_mouse.place_on_skull(
         target_name='cavity_centre', apex_to_target_mm=20.0,
         beam_tilt_deg_yz=20.0, verbose=False)
@@ -67,6 +81,10 @@ def test_placement_cavity_centre():
 
 def test_placement_cc_left_body():
     print('\n=== test_placement_cc_left_body ===')
+    cfg = _load_legacy()
+    if cfg is None:
+        return True
+    tuba_mouse, legacy_placement, _ = cfg
     tuba_p = tuba_mouse.place_on_skull(
         target_name='CC_left_body', apex_to_target_mm=10.0,
         beam_tilt_deg_yz=0.0, verbose=False)
@@ -78,6 +96,10 @@ def test_placement_cc_left_body():
 
 def test_slab():
     print('\n=== test_slab (cavity_centre, 20mm, 20deg tilt) ===')
+    cfg = _load_legacy()
+    if cfg is None:
+        return True
+    tuba_mouse, legacy_placement, legacy_slab = cfg
     p = legacy_placement.place_on_maga_skull(
         target_name='cavity_centre', apex_to_target_mm=20.0,
         beam_tilt_deg_yz=20.0, debug=False)
@@ -126,6 +148,10 @@ def test_slab():
 
 def test_cavity_centroid():
     print('\n=== test_cavity_centroid ===')
+    cfg = _load_legacy()
+    if cfg is None:
+        return True
+    tuba_mouse, _, _ = cfg
     from tuba.core.cavity import cavity_centroid_world_mm
     from maga_placement import _brain_centre_world_mm
     t = cavity_centroid_world_mm(tuba_mouse.CAVITY_NII)

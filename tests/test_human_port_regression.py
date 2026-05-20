@@ -13,8 +13,15 @@ Compares ``tuba.species.human`` against
   lateral (t1) axis: ``c_map_TUBA[i_lat, ...] == c_map_legacy[
   n_lat-1-i_lat, ...]``. We assert this mirrored bit-equality.
 
+The coord-helper test runs anywhere TUBA imports cleanly; the
+placement and slab tests self-skip when ``TUBA_LEGACY_HUMAN_REG`` or
+``TUBA_HUMAN_NRRD_PATH`` are unset, so pytest can collect this file
+on hosts without staged legacy data.
+
 Run from the TUBA project root:
     PYTHONPATH=src python tests/test_human_port_regression.py
+or via pytest:
+    PYTHONPATH=src pytest tests/test_human_port_regression.py -v
 """
 import os
 import sys
@@ -22,34 +29,33 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TUBA_SRC = os.path.join(HERE, '..', 'src')
-# LEGACY_REG points at the original neuromod_parameters/registration/
-# checkout that TUBA was ported from. Set ``TUBA_LEGACY_HUMAN_REG``
-# to its path to run the bit-identity regression; self-skips otherwise.
 LEGACY_REG = os.environ.get('TUBA_LEGACY_HUMAN_REG', '')
 sys.path.insert(0, TUBA_SRC)
 
-if not LEGACY_REG or not os.path.isdir(LEGACY_REG):
-    print('SKIP: set TUBA_LEGACY_HUMAN_REG to the legacy '
-          'neuromod_parameters/registration directory to run this regression.')
-    sys.exit(0)
-sys.path.insert(0, LEGACY_REG)
 
-# Point the TUBA species module at the same legacy directory so the
-# warped MNI products and saved ANTs transforms it reads are the ones
-# the bit-identity test is comparing against. Set the env vars BEFORE
-# importing tuba.species.human so module-level constants resolve to
-# the right paths. ``TUBA_HUMAN_NRRD_PATH`` must be exported by the
-# caller; the regression is intentionally non-portable and skips here
-# rather than hard-coding any one lab's filesystem layout.
-os.environ.setdefault('TUBA_HUMAN_REG_DIR', LEGACY_REG)
-if not os.environ.get('TUBA_HUMAN_NRRD_PATH'):
-    print('SKIP: set TUBA_HUMAN_NRRD_PATH to the Halle skull NRRD '
-          '(or run tuba.data.fetch_human to stage it).')
-    sys.exit(0)
-
-from tuba.species import human as tuba_human
-import halle_placement as legacy_placement
-import skull_slab_3d as legacy_slab
+def _load_legacy():
+    """Return ``(tuba_human, legacy_placement, legacy_slab)`` after
+    pointing TUBA at the legacy cache, or print a skip message and
+    return ``None`` if either ``TUBA_LEGACY_HUMAN_REG`` or
+    ``TUBA_HUMAN_NRRD_PATH`` is unset / invalid."""
+    if not LEGACY_REG or not os.path.isdir(LEGACY_REG):
+        print('  SKIP: set TUBA_LEGACY_HUMAN_REG to the legacy '
+              'neuromod_parameters/registration directory to run this regression.')
+        return None
+    os.environ.setdefault('TUBA_HUMAN_REG_DIR', LEGACY_REG)
+    if not os.environ.get('TUBA_HUMAN_NRRD_PATH'):
+        print('  SKIP: set TUBA_HUMAN_NRRD_PATH to the Halle skull NRRD '
+              '(or run tuba.data.fetch_human to stage it).')
+        return None
+    if LEGACY_REG not in sys.path:
+        sys.path.insert(0, LEGACY_REG)
+    for mod in list(sys.modules):
+        if mod.startswith('tuba'):
+            del sys.modules[mod]
+    from tuba.species import human as tuba_human
+    import halle_placement as legacy_placement
+    import skull_slab_3d as legacy_slab
+    return tuba_human, legacy_placement, legacy_slab
 
 
 def _close(a, b, atol):
@@ -62,7 +68,9 @@ def _close_vec(a, b, atol):
 
 
 def test_coord_helpers():
+    """Pure-math coord conversion -- runs without legacy data."""
     print('\n=== test_coord_helpers ===')
+    from tuba.species import human as tuba_human
     pt_nrrd = (100.0, 50.0, 75.0)
     pt_ras = tuba_human.nrrd_voxel_mm_to_halle_ras(pt_nrrd)
     pt_back = tuba_human.halle_ras_to_nrrd_voxel_mm(pt_ras)
@@ -74,6 +82,10 @@ def test_coord_helpers():
 
 def test_placement_S1_left_CP3():
     print('\n=== test_placement_S1_left_CP3 ===')
+    cfg = _load_legacy()
+    if cfg is None:
+        return True
+    tuba_human, legacy_placement, _ = cfg
     legacy_p = legacy_placement.place_on_skull(
         scalp_site='CP3', target_name='S1_left',
         eeg_search_radius_mm=10.0,
@@ -140,6 +152,10 @@ def test_placement_S1_left_CP3():
 
 def test_slab():
     print('\n=== test_slab (S1_left, CP3) ===')
+    cfg = _load_legacy()
+    if cfg is None:
+        return True
+    tuba_human, legacy_placement, legacy_slab = cfg
     legacy_p = legacy_placement.place_on_skull(
         scalp_site='CP3', target_name='S1_left',
         eeg_search_radius_mm=10.0,
