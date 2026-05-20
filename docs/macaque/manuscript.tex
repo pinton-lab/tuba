@@ -52,20 +52,22 @@ isotropic on a General Electric phoenix v$\vert$tome$\vert$x microCT and
 distributed via MorphoSource. The brain reference is the NMT v2.0-sym
 template at 0.25\,mm isotropic, bundled with the CHARM and SARM
 hierarchical parcellations. We describe the orientation determination
-from raw bone-mass profiles, PCA-based rigid pre-alignment, an
-endocranial-cavity extractor that uses a brain-region bounding box plus
-hysteresis-thresholded morphological closing to handle the large
-basicranium and orbital openings characteristic of the primate skull, an
-ANTs-SyN registration of the cavity to the NMT brain mask with the
-inverse warp pushing the CHARM/SARM annotations back into skull space, an
-acoustic-property mapping with histogram-anchored ramp endpoints, and a
-single transcranial angular-spectrum simulation through the resulting
-slab at the dACC target. Code and intermediate caches live in
-\texttt{registration/}; the run script is \texttt{run\_macaque.py}. The
-pipeline mirrors the existing 15\,MHz mouse-skull validation
-(\texttt{mouse\_therapy/validation\_report\_maga/}) so that downstream
-solver choices, drive-calibration recipe, and post-processing are
-preserved while the species, frequency, and target are updated.
+from raw bone-mass profiles, constrained-PCA rigid pre-alignment on a
+cranium-only point cloud, an endocranial-cavity extractor that fits an
+ANTs Affine between a bone-shell intermediate and the NMT brain mask
+and post-processes the inverse-warped mask with a 2\,mm closing and a
+bone-as-constraint clip (six rejected alternatives, including a SyN
+warp, are documented in the appendix), an acoustic-property mapping
+with histogram-anchored ramp endpoints, and a single transcranial
+angular-spectrum simulation through the resulting slab at the dACC
+target. Code lives under \texttt{src/tuba/\_macaque/} with the public
+API at \texttt{tuba.species.macaque}; intermediate caches are written
+to \texttt{\$TUBA\_MACAQUE\_REG\_DIR} (default
+\texttt{\textasciitilde/.cache/tuba/macaque/registration}). The
+pipeline shares the TUBA core primitives with the 15\,MHz mouse-skull
+validation (\texttt{docs/mouse/}) so that downstream solver choices,
+drive-calibration recipe, and post-processing are preserved while the
+species, frequency, and target are updated.
 \end{abstract}
 
 % =============================================================================
@@ -129,7 +131,7 @@ v2.0-sym~\cite{nmt-v2}, a population-averaged $T_1$-weighted MR
 template constructed from 31 adult rhesus macaque brains and
 distributed by the AFNI group at NIMH. We download the bundled
 package \texttt{NMT\_v2.0\_sym.tgz} via
-\texttt{templates/}\allowbreak\texttt{fetch\_nmt\_v2.py}. The bundle
+\texttt{tuba.data.fetch\_nmt}. The bundle
 ships at 0.25\,mm isotropic and contains, in addition to the averaged
 template intensity volume:
 \begin{itemize}[leftmargin=*]
@@ -146,6 +148,38 @@ template intensity volume:
         same axis convention.
 \end{itemize}
 
+Figure~\ref{fig:nmt-atlases} shows the NMT T1 template alongside the
+finest-level CHARM, SARM, and D99 parcellations in NMT native space
+at the brain-mask centroid. The deterministic
+ID-to-palette hash ensures spatially neighbouring labels are
+colour-separated for visual interpretability.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{nmt_atlases.png}
+\caption{NMT v2.0-sym macaque atlas and three parcellations in NMT
+         native space at 0.25\,mm isotropic. Rows are sagittal /
+         coronal / axial orthoslices through the NMT brain-mask
+         centroid at world coordinates $(0.0, +6.4, +17.5)$\,mm.
+         \textbf{Col 1}: $T_1$ averaged template, with the binary
+         brain mask drawn as a cyan contour.
+         \textbf{Col 2}: CHARM level 6 (the finest cortical level,
+         134 labels).
+         \textbf{Col 3}: SARM level 6 (the finest subcortical level,
+         205 labels).
+         \textbf{Col 4}: D99 v2 (combined cortical + subcortical,
+         197 labels).
+         CHARM and SARM are 5-D \texttt{(x,y,z,1,6)} NIfTIs where the
+         last axis indexes hierarchy depth; the level-6 slice is
+         extracted as \texttt{arr[..., 0, 5]}. Label IDs are mapped
+         through a deterministic ID-hash to a \texttt{gist\_ncar}
+         palette so spatially neighbouring labels are colour-
+         separated. Companion to Fig.~\ref{fig:registration-qc}, which
+         shows these atlases after the Affine warp of
+         \S\ref{sec:registration} into macaque skull space.}
+\label{fig:nmt-atlases}
+\end{figure}
+
 \paragraph{Target structure.}
 We target the dorsal anterior cingulate cortex (dACC, CHARM area\,24).
 At CHARM level 6 the area\,24 sub-regions have integer IDs
@@ -156,7 +190,7 @@ the densest target in the macaque transcranial-FUS literature: Folloni
 \textit{et al.}~2019~\cite{folloni}, Khalighinejad
 \textit{et al.}~2020~\cite{khalighinejad}, and Verhagen
 \textit{et al.}~2019~\cite{verhagen} all published macaque-tFUS effects
-on dACC at 250-500\,kHz with single-element bowls. Badran
+on dACC at 250-500\,kHz with single-element bowls. Strohman
 \textit{et al.}~2024~\cite{badran} subsequently demonstrated an
 analogous low-intensity dACC FUS protocol in humans for acute pain
 modulation, providing a direct translational analog.
@@ -170,7 +204,7 @@ metadata is the per-voxel pitch (60.6\,$\mu$m isotropic) from the media
 manifest. We determine the mapping from storage axes $(s, r, c)$ to
 anatomical $(R\text{-}L, A\text{-}P, D\text{-}V)$ in three independent
 steps, all implemented in
-\texttt{registration/}\allowbreak\texttt{orientation\_probe.py}: a
+\texttt{tuba.\_macaque.\allowbreak orientation\_probe}: a
 per-slice bone-mass profile across 21 evenly spaced slices, a
 log-binned intensity histogram from a sample of every 16th slice, and
 mid-stack orthoslice renders.
@@ -239,10 +273,16 @@ voxels), specimen mounting / soft-tissue residue with peak at
 $\sim$5000 ($\sim$10$^5$ voxels), and a broad cortical-bone band from
 10\,kHU to 45\,kHU with primary mode at $\sim$32\,kHU and a
 denser tail at 40-44\,kHU corresponding to the dental enamel of the
-mandibular incisors and molars. The hysteresis thresholds used by the
-cavity extractor of \S\ref{sec:cavity} sit cleanly in the gap between
-the mounting peak and the cortical band:
-\texttt{BONE\_LOW}\,$=8000$ and \texttt{BONE\_HIGH}\,$=20000$. The
+mandibular incisors and molars. The bone-shell seed threshold used by
+the cavity extractor of \S\ref{sec:cavity} sits cleanly in the gap
+between the mounting peak and the cortical band:
+\texttt{BONE\_LOW}\,$=8000$, the local constant in
+\texttt{tuba.\_macaque.\allowbreak fast\_iter\_250um}. (The
+constrained-PCA recipe of \S\ref{sec:align} uses a tighter
+\texttt{ALIGN\_PCA\_THRESH}\,$=25000$ to exclude the dental enamel
+tail, and a single module-level \texttt{BONE\_THRESH}\,$=10000$ in
+\texttt{tuba.\_macaque.\allowbreak macaque\_skull\_constants} feeds the
+orientation-probe bone-mass profile.) The
 histogram-mode-derived cortical-bone intensity is also used as the
 $I_{\mathrm{high}}$ anchor for the acoustic-property ramp of
 \S\ref{sec:acoustic-mapping}: $I_{\mathrm{high}}=32000$ corresponds to
@@ -288,7 +328,7 @@ bbox, any bone CC that is not the main cranium CC is also zeroed;
 this removes any mandible fragment that happened to fall inside the
 cranium bbox. The cranium CC has 53.1\,mL of bone; the discarded
 mandible CC has 17.5\,mL of bone. The same crop is repeated on the
-aligned-native cache (\texttt{registration/}\allowbreak\texttt{isolate\_cranium.py})
+aligned-native cache (\texttt{tuba.\_macaque.\allowbreak isolate\_cranium})
 after the rotation step below, so any remaining mandible fragments
 displaced into the cranium bbox by the rotation are also suppressed.
 
@@ -298,7 +338,7 @@ cranium-alone L-R and D-V variances are within 14\,\% of each other
 ($14\,942 : 4\,626 : 4\,046$\,vox$^2$ for AP\,:\,LR\,:\,DV), so the
 two smaller eigenvectors are degenerate and rotate arbitrarily about
 the AP axis. We therefore use a constrained-PCA recipe in
-\texttt{registration/}\allowbreak\texttt{find\_cranium\_alignment.py}:
+\texttt{tuba.\_macaque.\allowbreak find\_cranium\_alignment}:
 \begin{enumerate}[leftmargin=*]
 \setlength\itemsep{0pt}
   \item Take $\mathbf{v}_{AP}$ from the largest PCA eigenvector
@@ -363,167 +403,226 @@ no mandible structure remaining anywhere in the volume.
 \section{Endocranial cavity extraction}
 \label{sec:cavity}
 
-The cavity extractor
-(\texttt{registration/}\allowbreak\texttt{extract\_macaque\_cavity.py})
-operates on the 242.45\,$\mu$m aligned cache. The macaque cranium has
-multiple anatomical openings whose linear dimensions exceed any
-realistic morphological-closing radius -- the foramen magnum
-($\sim$12\,mm), the orbital rims ($\sim$25\,mm), the choanae
-($\sim$10\,mm each), and the temporal/infratemporal fossae ($\sim$30\,mm
-opening on each side of the skull). A pure
-hysteresis-threshold-plus-closing extractor of the kind that worked for
-the dry mouse skull (\cite{maga-validation}, $\sim$1\,mm closing seals
-all foramina) is therefore unworkable for the macaque: even at 15\,mm
-closing we recover $\le 1.2$\,mL out of the expected $\sim$85\,mL
-brain volume.
+The production cavity is the NMT v2 brain mask warped into macaque
+space via an ANTs Affine alignment, post-processed with a 2\,mm
+morphological closing and a bone-as-constraint clip. The recipe is
+implemented in
+\texttt{tuba.\_macaque.\allowbreak fast\_iter\_250um} at the
+$242$\,$\mu$m working resolution and in
+\texttt{tuba.\_macaque.\allowbreak native\_cavity} at the
+native $60.6$\,$\mu$m resolution. Six alternative approaches that we
+considered and rejected (closing-only, bone-shell extraction in three
+variants, SyN registration, shrink-fit, and geodesic propagation) are
+documented as Appendix~\ref{app:cavity-trials}.
 
-\paragraph{Pipeline.}
-The macaque cranium has multiple anatomical openings (orbits at
-$\sim$25\,mm, temporal fossa at $\sim$30\,mm, foramen magnum at
-$\sim$12\,mm, plus the small foramina ovale/rotundum/spinosum and
-the cribriform plate's sieve) whose linear dimensions exceed any
-realistic morphological-closing reach. Iterative attempts at
-shell-based extraction (rectangular bbox, brain-ROI bbox with
-basicranium floor, per-slice convex hull of closed bone, per-slice
-\texttt{binary\_fill\_holes}) all produced visible non-anatomical
-artefacts -- straight bbox edges, hull over-extension into
-extra-cranial space, or volume far short of the published adult
-rhesus brain volume. We therefore replace the shell-based extractor
-with a \emph{template-warp} approach
-(\texttt{registration/}\allowbreak\texttt{cavity\_from\_nmt.py}): the
-cavity is the NMT v2 brain mask warped into macaque space via an
-initial silhouette-based affine alignment, which is anatomically
-correct by construction. Cross-modal SyN of the NMT MR template to
-the macaque CT was attempted but converged to local minima with the
-brain placed in the maxilla; the silhouette-based affine is more
-robust to the bright-bone (CT) vs bright-tissue (MR) contrast
-inversion.
+\paragraph{Bone-shell intermediate.}
+The Affine alignment requires a rough macaque-space target. We build
+this from the macaque CT as the union of (i) cortical bone above
+\texttt{BONE\_LOW}=8000 with a 5\,mm morphological closing to bridge
+sutures, (ii) a per-axial convex hull of bone restricted to
+$\pm 35$\,mm laterally and to a $z$-dependent rostral cutoff
+($y\le-3$\,mm at low $z$ where the snout/maxilla is present,
+$y\le+20$\,mm at high $z$ where only the frontal bone exists, breaking
+at $z=0$), (iii) a per-column curved basicranium floor (all voxels
+ventral to the lowest closed-bone in each $(x,y)$ column), and (iv)
+per-row curved rostral and caudal plugs (anterior of the most-rostral
+and posterior of the most-caudal closed-bone in each $(x,z)$ row).
+Voxels enclosed by this shell -- identified by region-grow seeding
+from the volume boundary and taking the largest connected component
+-- form the bone-shell cavity (92.8\,mL). The shell-bounded cavity is
+discarded after the Affine fit; only the affine transform survives
+into downstream steps.
 
-The pipeline is:
-\begin{enumerate}[leftmargin=*]
-\setlength\itemsep{0pt}
-  \item Build a binary cranium-only silhouette from the macaque microCT
-        -- bone $> 8000$ restricted to the cranium AP region
-        ($y \le -3$\,mm so the maxilla / dental arch / snout don't
-        bias the alignment forward), 15\,mm closing to bridge all
-        anatomical openings, \texttt{binary\_fill\_holes} to fill
-        the cranium interior, then 5\,mm dilation to approximate the
-        scalp surface. The macaque silhouette is $\sim$148\,mL.
-  \item Build a binary NMT silhouette by thresholding
-        \texttt{NMT\_v2.0\_sym\_fh.nii.gz} at 50 (captures all
-        in-head soft tissue) and \texttt{binary\_fill\_holes}. The
-        NMT silhouette is $\sim$299\,mL (whole head with neck and
-        soft tissue extending below the cranium).
-  \item ANTs Affine register the NMT silhouette (moving) to the
-        macaque silhouette (fixed) using mean-squares. The affine
-        maps NMT-coord to macaque-coord with the right scale,
-        position, and orientation to align the head shapes.
-  \item Apply the affine (forward) to
-        \texttt{NMT\_v2.0\_sym\_fh\_brainmask} with
-        \texttt{nearestNeighbor} interpolation. The warped mask is
-        the macaque cavity.
-\end{enumerate}
+\paragraph{Affine NMT-mask warp.}
+ANTs Affine registers the bone-shell cavity (moving, binary) to the
+NMT v2 brain mask (fixed, binary, resampled to $250$\,$\mu$m) using a
+mean-squares metric over the 12-DOF affine (translation, rotation,
+scale, shear). We then apply the inverse warp to the NMT brain mask
+with linear interpolation and threshold at 0.5, yielding a brain mask
+in macaque space that retains the smooth NMT atlas topology. A 2\,mm
+morphological closing cleans the linear-interpolation jaggedness, and
+a final clip against the macaque bone mask
+(\texttt{bone\_mask}\,$\equiv$\,\texttt{ct\_arr > BONE\_LOW}) ensures
+no cavity voxel lies inside bone -- the bone-as-constraint principle
+borrowed from the human clinical-CT shrink-fit pipeline. Total Affine
++ post-processing wall time on 8 cores is $\sim$5\,min at $250$\,$\mu$m.
 
-\paragraph{Result.}
-The recovered cavity has volume 66.6\,mL, just below the published
-adult-rhesus range ($\sim$85\,mL,
-range 70-110\,mL)~\cite{rhesus-volume}. The modest under-fill
-reflects the affine-only alignment -- the SyN registration of
-\S\ref{sec:registration} subsequently refines the cavity-to-NMT
-mapping with a non-linear deformation, after which the warped NMT
-brain mask in macaque space matches the actual brain extent more
-precisely. Crucially, the cavity is now \emph{anatomically a brain
-shape}, with no flat bbox edges, no convex-hull over-extension into
-extra-cranial space, and no leakage through the foramen magnum or
-other foramina. Fig.~\ref{fig:cavity-qc} shows the cavity (magenta
-fill) overlaid on the macaque skull through nine orthoslices spanning
-the brain box. The cavity sits inside the cranium from caudal occiput
-to rostral frontal cortex, bounded by the dorsal vault, basicranium,
-and frontal bone everywhere except small lateral extensions where
-the affine doesn't perfectly conform to the temporal-fossa contour
-(those get refined by the downstream SyN).
+\paragraph{Validation.}
+The $242$\,$\mu$m production cavity is 88.4\,mL, sitting within the
+published adult-rhesus range of 70--110\,mL with mean
+$\sim$85\,mL~\cite{rhesus-volume}. Fig.~\ref{fig:cavity-qc} overlays
+the cavity (magenta) on the macaque skull at nine orthoslices spanning
+the brain box; the boundary tracks the inner cortical table from the
+caudal occiput to the rostral frontal cortex, with small bone-clip
+notches at the petrous bones in the basicranium that correspond to
+real internal bone obstacles. No flat bbox edges, no convex-hull
+over-extension into extra-cranial space, no foramen-magnum leakage,
+and -- crucially -- no soft-tissue tracking at the dorsal-anterior
+midline (a SyN-specific failure mode discussed in
+Appendix~\ref{app:cavity-trials}).
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{macaque_cranial_cavity_qc.png}
-\caption{Endocranial cavity (magenta fill) overlaid on the
-         242.45\,$\mu$m macaque skull through nine orthoslices.
-         Volume = 66.6\,mL.
-         The cavity is the NMT v2 brain mask warped into macaque
-         space via a silhouette-based affine alignment of the NMT
-         head silhouette to the macaque cranium-only silhouette --
-         anatomically a brain shape by construction, with no bbox
-         or hull artefacts.
-         Each row is one orthogonal axis (sagittal / coronal /
-         axial); each column shows a different slice position
-         (lateral-mid-lateral / caudal-mid-rostral /
-         ventral-mid-dorsal) so the dorsal vault, brain-box centre,
-         and basicranium are all visible. Each panel is plotted with
-         explicit world-coord limits matching the bone bbox + 5\,mm
-         (10\,mm above the vault), so no part of the skull is
-         clipped at the panel edges.}
+\caption{Production endocranial cavity (magenta fill) overlaid on the
+         $242$\,$\mu$m macaque skull through nine orthoslices.
+         Volume = 88.4\,mL, within the published adult-rhesus range
+         of 70--110\,mL.
+         Rows are sagittal/coronal/axial; columns are
+         lateral/mid/lateral, caudal/mid/rostral, ventral/mid/dorsal.
+         The cavity has the smooth NMT atlas topology with small
+         bone-clip notches at the petrous bones in the basicranium.}
 \label{fig:cavity-qc}
 \end{figure}
 
+\paragraph{Native-resolution cavity.}
+For high-frequency simulations the $242$\,$\mu$m cavity is upsampled
+to the native $60.6$\,$\mu$m grid in
+\texttt{tuba.\_macaque.\allowbreak native\_cavity}. The
+native CT is first refined into the same world coordinates as the
+$250$\,$\mu$m cache by re-applying the world-frame rotation
+($-22^\circ$ about $+x$, $-1.5^\circ$ about $+y$) and translation
+($+5$\,mm in $x$, $-27$\,mm in $z$) of the $250$\,$\mu$m alignment,
+with 30\,mm padding on each side
+(\texttt{tuba.\_macaque.\allowbreak refine\_native}; the
+output is $3338\times3938\times3149$, $\sim$41.4\,Gvox, $\sim$83\,GB
+uint16). The upstream \texttt{align\_native\_to\_axes} step uses
+\texttt{pad\_voxels}\,$=400$ (24\,mm cushion at $60.6$\,$\mu$m) so the
+rotated bone has enough source-FOV headroom to survive the
+$-27$\,mm $z$ translation in \texttt{refine\_native.py} without
+\texttt{cval=0} truncation at the inferior basicranium and
+forehead. The $250$\,$\mu$m production cavity is then lossless
+upsampled to the native grid via nearest-neighbour
+\texttt{scipy.ndimage.affine\_transform} (\texttt{order=0}); no
+further closing or bone-clipping is applied at native (those were
+validated steps at $250$\,$\mu$m, and re-applying them at native
+would require debugging at the higher resolution where each
+iteration costs $\sim$50\,min, defeating the validate-at-low-res /
+scale-up-at-high-res strategy). The native cavity is 87.7\,mL,
+within $0.7$\,mL of the $250$\,$\mu$m source (88.4\,mL) -- the only
+loss is from the NN-resample boundary. (The native cavity carried
+forward from the pre-pad400 production run is retained for Fig.~5
+since its overlay still tracks the inner cortical table cleanly;
+a future iteration may regenerate the native cavity from the
+88.4\,mL $242$\,$\mu$m source for strict consistency.) The native cavity supports
+high-frequency FDTD up to $\sim$5\,MHz given the $60.6$\,$\mu$m grid
+pitch ($5\,\text{vox}/\lambda$ in soft tissue at $c=1540$\,m/s).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{native_cavity_qc.png}
+\caption{Native-resolution cavity at $60.6$\,$\mu$m, 87.7\,mL
+         (NN-upsample of the 88.4\,mL $242$\,$\mu$m production cavity;
+         see \S\ref{sec:cavity}),
+         overlaid on the $242$\,$\mu$m block-max bone backdrop through
+         nine orthoslices. The cavity contour is at native resolution;
+         the bone backdrop is the factor-4 block-max downsample of the
+         refined native CT, which matches the visual quality of
+         Fig.~\ref{fig:cavity-qc} for direct visual comparison.
+         The cavity is a nearest-neighbour upsample of the
+         $242$\,$\mu$m production cavity -- identical topology,
+         identical bone-bounded geometry, only the display resolution
+         and bone resolution differ.}
+\label{fig:native-cavity-qc}
+\end{figure}
+
 % =============================================================================
-\section{NMT v2 to cavity registration}
+\section{NMT v2 atlas warp into macaque space}
 \label{sec:registration}
 
-The cavity is registered to the NMT v2 brain mask using ANTs SyN
-(\texttt{registration/}\allowbreak\texttt{register\_macaque\_}\allowbreak\texttt{cavity\_to\_nmt.py}).
-The cavity is the moving image (binary, 7.3\,M voxels, $\sim$104\,mL
-of brain compartment); the fixed image is
-\texttt{NMT\_v2.0\_sym\_brainmask.nii.gz} (binary, also $\sim$80\,mL).
-The two grids share a common voxel pitch within 3\,\% (242.45\,$\mu$m
-macaque, 250\,$\mu$m NMT) so the SyN cost is dominated by the
-non-linear deformation. Total SyN wall time on a single core is
-$\sim$13\,s.
+The same ANTs Affine that produced the production cavity
+(\S\ref{sec:cavity}) is reused to warp the NMT v2 averaged-MR template
+and the CHARM/SARM/D99 hierarchical parcellations into macaque space.
+The Affine is computed once between the bone-shell cavity and the
+NMT brain mask at $250$\,$\mu$m and is resolution-independent: the
+inverse warp can be applied at $250$\,$\mu$m for visualisation or at
+the native $60.6$\,$\mu$m for downstream acoustic-property mapping
+without re-fitting. Total Affine wall time on 8 cores is $\sim$3\,min
+at $250$\,$\mu$m.
 
-We apply the inverse warp to push the NMT template, brain mask, and the
-CHARM/SARM/D99 atlases back into the macaque 242.45\,$\mu$m grid using
-\texttt{ants.apply\_transforms}. The CHARM and SARM volumes are 5-D
-$(x, y, z, 1, 6)$ and the ANTs Python wrapper does not accept 5-D
-inputs, so we extract each of the 6 hierarchy levels as a 3-D label
-volume, warp it independently with the
-\texttt{genericLabel} interpolator (preserving integer region IDs),
-and re-stack the warped levels into a 5-D output that the placement
-helper can index as \texttt{arr[..., 0, 5]} for level 6.
+The CHARM and SARM volumes are 5-D $(x, y, z, 1, 6)$ and the ANTs
+Python wrapper does not accept 5-D inputs, so we extract each of the
+6 hierarchy levels as a 3-D label volume, warp it independently with
+the \texttt{genericLabel} interpolator (preserving integer region
+IDs), and re-stack the warped levels into a 5-D output that the
+placement helper can index as \texttt{arr[..., 0, 5]} for level 6.
 
-Fig.~\ref{fig:registration-qc} shows the warped NMT template (warm
-colour overlay, left column) and the warped CHARM L6 region annotation
-(saturated per-region colour, right column) on the macaque skull
-through the dACC area\,24 centroid. The dACC area\,24 region (CHARM L6
-IDs $\{8, 9, 13, 14\}$, lime contour in the right column) recovers
-16\,595 voxels in the macaque frame ($\sim$0.24\,mL bilateral),
-centred at world coordinates
-$(x, y, z) = (-2.9, -15.8, +20.5)$\,mm relative to the cranium-centroid
-origin. The position is at the dorsal-frontal cortex midline,
-consistent with the known macaque dACC location.
+The choice of Affine over SyN is justified in detail in
+\S\ref{sec:cavity}: a SyN warp introduces local deformations that
+follow soft-tissue features of the cavity (longitudinal fissure,
+incomplete bone-closing artefacts) into the warped atlas, whereas an
+Affine warp preserves the smooth atlas topology by construction. For
+the atlas labels this is the more important property -- region
+boundaries should follow NMT anatomy, not macaque cavity peculiarities.
+
+The production Affine warp is saved as
+\texttt{cavity\_to\_nmt\_affine\_iter21.mat} under
+\texttt{\$TUBA\_MACAQUE\_REG\_DIR} (default
+\texttt{\textasciitilde/.cache/tuba/macaque/registration}); reapplying
+it produces
+\texttt{nmt\_template\_in\_macaque.nii.gz},
+\texttt{nmt\_brainmask\_in\_macaque.nii.gz},
+\texttt{charm\_in\_macaque.nii.gz} (5-D), \texttt{sarm\_in\_macaque.nii.gz}
+(5-D), and \texttt{d99\_in\_macaque.nii.gz} (\,$\sim$\,15\,min total on
+8 cores; script:
+\texttt{tuba.\_macaque.\allowbreak warp\_atlases\_via\_affine}).
+The warped dACC area\,24 region (CHARM L6 IDs $\{8, 9, 13, 14\}$,
+bilateral) recovers $23\,190$ voxels in the macaque frame
+($\sim$0.33\,mL), centred at world coordinates
+$(+1.14, -15.15, +14.94)$\,mm relative to the cranium-centroid origin.
+This is $\sim$5.6\,mm ventral and 4.0\,mm rostral of the SyN-era
+preliminary estimate $(-2.9, -15.8, +20.5)$\,mm reported in earlier
+drafts; the difference reflects the SyN-era warp's local distortion
+at the dorsal cortex rather than a genuine anatomical disagreement.
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.95\textwidth]{registration_qc.png}
-\caption{Macaque cavity $\to$ NMT v2 SyN registration QC at 242.45\,$\mu$m.
+\caption{Macaque cavity $\to$ NMT v2 atlas warp QC at 242.45\,$\mu$m.
          Three orthoslices (sagittal, coronal, axial, top to bottom)
-         through the dACC centroid. \textbf{Left column}: macaque
-         skull (greyscale) with the warped NMT averaged-MR template
-         (warm overlay). \textbf{Right column}: same skull with the
-         warped CHARM L6 region annotation (saturated per-region colour,
-         lime contour highlighting the dACC area\,24 IDs
-         $\{8, 9, 13, 14\}$). Cyan contour: extracted endocranial cavity
-         from \S\ref{sec:cavity}.}
+         through the dACC centroid.
+         \textbf{Left column}: macaque skull (greyscale) with the
+         warped NMT averaged-MR template (warm overlay).
+         \textbf{Right column}: same skull with the warped CHARM L6
+         region annotation (saturated per-region colour, lime contour
+         highlighting the dACC area\,24 IDs $\{8, 9, 13, 14\}$).
+         Cyan contour: production endocranial cavity (88.4\,mL).
+         Companion to the same-data, atlas-by-atlas montage in
+         Fig.~\ref{fig:atlases-in-macaque}.}
 \label{fig:registration-qc}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{nmt_atlases_in_macaque.png}
+\caption{NMT v2 template and parcellations after the Affine warp
+         (\S\ref{sec:registration}) into macaque skull space, painted
+         over the macaque 242.45\,$\mu$m bone (greyscale). Rows are
+         sagittal / coronal / axial orthoslices through the production
+         endocranial-cavity centroid. \textbf{Col 1}: warped NMT
+         $T_1$ template (hot overlay). \textbf{Col 2}: warped CHARM
+         level 6 (134 cortical labels). \textbf{Col 3}: warped SARM
+         level 6 (206 subcortical labels). \textbf{Col 4}: warped
+         D99 v2 (197 combined labels). Label IDs are coloured by the
+         same deterministic ID-hash used in
+         Fig.~\ref{fig:nmt-atlases}, so the same anatomical region
+         retains the same colour in NMT native space and in macaque
+         skull space -- direct visual confirmation that the Affine
+         warp preserves the atlas's smooth NMT topology without
+         introducing the local distortions characteristic of an SyN
+         warp (\S\ref{sec:cavity}).}
+\label{fig:atlases-in-macaque}
 \end{figure}
 
 % =============================================================================
 \section{Acoustic-property mapping}
 \label{sec:acoustic-mapping}
 
-The transcranial angular-spectrum simulation requires per-voxel maps of
-sound speed $c(\mathbf{r})$ and density $\rho(\mathbf{r})$. We adopt
-the Maga-style piecewise-linear ramp anchored on the histogram
-populations of \S\ref{sec:orientation}, implemented in
-\texttt{registration/}\allowbreak\texttt{macaque\_}\allowbreak\texttt{skull\_slab\_3d.py}:
+The transcranial simulation requires per-voxel maps of sound speed
+$c(\mathbf{r})$ and density $\rho(\mathbf{r})$. We adopt the Maga-style
+piecewise-linear ramp anchored on the histogram populations of
+\S\ref{sec:orientation}, implemented in
+\texttt{tuba.\_macaque.\allowbreak macaque\_\allowbreak skull\_slab\_3d}:
 \begin{itemize}[leftmargin=*]
 \setlength\itemsep{0pt}
   \item $I_{\mathrm{low}} = 8000$ (mounting/bone separation): voxels at
@@ -541,9 +640,12 @@ properties for the simulation
 bone (e.g., the falx cerebri or sutural protrusions surviving the
 cavity extractor) keep their intensity-derived values.
 
-The slab loader returns $(c, \rho, dz_{\mathrm{slab}}, \mathrm{frame})$
-matching the Maga signature so the FDTD/angular-spectrum driver in
-\texttt{run\_macaque.py} mirrors the corresponding mouse driver.
+The slab loader is wrapped as
+\texttt{tuba.species.\allowbreak macaque.\allowbreak load\_slab} and
+returns $(c, \rho, dz_{\mathrm{slab}}, \mathrm{frame})$ with the same
+signature as \texttt{tuba.species.\allowbreak mouse.\allowbreak load\_slab},
+so any FDTD or angular-spectrum driver wired against one species runs
+on the other unchanged.
 
 \paragraph{Attenuation.}
 We use linear-frequency-dependent attenuation with
@@ -560,10 +662,10 @@ the source data release; this is left to future work.
 
 \paragraph{Placement.}
 The placement helper
-(\texttt{registration/}\allowbreak\texttt{macaque\_}\allowbreak\texttt{placement.py})
+(\texttt{tuba.\_macaque.\allowbreak macaque\_placement}; public API at \texttt{tuba.species.macaque.place\_on\_skull})
 computes the apex/target/beam triple for a 500\,kHz, $f/1$
 single-element bowl ($D = 45$\,mm, ROC $=45$\,mm, geometric focus at
-ROC). It (i) loads the warped CHARM L6 volume from
+ROC). It (i) loads the Affine-warped CHARM L6 volume from
 \S\ref{sec:registration}, (ii) extracts the dACC area\,24 centroid,
 (iii) builds the outer-bone surface from the 242.45\,$\mu$m aligned
 cache (binary closing + fill-holes + boundary erosion), (iv) selects
@@ -571,18 +673,23 @@ the highest-$z$ surface voxel within a 10\,mm cylinder around the
 target $x, y$ position as the apex-on-bone candidate, and (v) lifts
 the apex along $+z$ by the amount required to make the
 apex-to-target Euclidean distance equal to the geometric focus
-(45\,mm). For the AMNH cranium with the NMT-warp cavity:
+(45\,mm). For the AMNH cranium with the production Affine-warped CHARM:
 \begin{itemize}[leftmargin=*]
 \setlength\itemsep{0pt}
-  \item target world (dACC centroid):
-        $(-2.9, -15.8, +20.5)$\,mm
-  \item beam direction: close to $-z$ with a small rostral and lateral
-        tilt induced by the dACC sub-region asymmetry
+  \item target world (dACC area\,24 centroid):
+        $(+1.14, -15.15, +14.94)$\,mm  (bilateral CHARM L6 IDs
+        $\{8, 9, 13, 14\}$ = 23\,190\,voxels = $\sim$0.33\,mL)
+  \item apex on bone (skull surface): $(+2.7, -16.9, +28.7)$\,mm
+  \item apex (lifted to focal distance): $(+2.7, -16.9, +59.9)$\,mm
+  \item beam direction: $(-0.035, +0.040, -0.999)$, i.e.\ near $-z$
+        with a small lateral tilt induced by the dACC sub-region
+        centroid offset
   \item apex--target distance: $45.0$\,mm (matching the bowl ROC)
+  \item scalp clearance: 31.1\,mm
 \end{itemize}
 
 \paragraph{Forward simulation.}
-The drive script (\texttt{run\_macaque.py}) selects an angular-spectrum
+The drive script selects an angular-spectrum
 grid at $\Delta x = \lambda_{\mathrm{brain}}/3.5 = 880$\,$\mu$m laterally
 and the same $\Delta z$ axially over a
 $60 \times 60 \times 65$\,mm domain
@@ -596,27 +703,30 @@ transcranial field matches the
 $\mathrm{MI} = 1.0$ free-field PNP target
 ($\mathrm{PNP}_{\mathrm{free}} = 1.0 \cdot \sqrt{0.5} = 0.707$\,MPa);
 this drive-calibration recipe is identical to the mouse pipeline. The
-required source amplitude is $p_0 = 78.3$\,kPa.
+required source amplitude is $p_0 = 85.7$\,kPa. At 500\,kHz this case
+is also compatible with sub-native FDTD on the same $880$\,$\mu$m
+grid; the native $60.6$\,$\mu$m cavity (\S\ref{sec:cavity}) supports
+higher-frequency follow-ups up to $\sim$5\,MHz on its own grid.
 
 \paragraph{Result.}
 Table~\ref{tab:focal} reports the focal metrics extracted from the
-angular-spectrum solve at the calibrated drive. The key numbers are
-that the transcranial focal $z$ falls at $36.08$\,mm rather than
-the geometric $45.00$\,mm
-($-8.92$\,mm), the focal peak pressure is $0.705$\,MPa (within
-$0.02$\,dB of the MI=1.0 free-field target of $0.707$\,MPa, well
-within calibration tolerance), and the simulation itself completes
-in $\sim$10\,s on a single core for this domain at this $\Delta x$.
-Fig.~\ref{fig:focal-field} shows the corresponding sound-speed
+angular-spectrum solve at the calibrated drive. The transcranial
+focal $z$ falls at $37.84$\,mm rather than the geometric $45.00$\,mm
+($-7.16$\,mm refraction shift, consistent with refraction through
+the curved cortical-bone interface of the macaque vault). The focal
+peak pressure matches the MI=1.0 free-field target of $0.707$\,MPa to
+machine precision (the post-hoc rescale forces this). The simulation
+itself completes in $10.5$\,s on a single core for this domain at this
+$\Delta x$. Fig.~\ref{fig:focal-field} shows the sound-speed
 cross-section, peak-normalised $|p|$ field, and on-axis / lateral
-profiles through the focal voxel. The focal $z$ shift is consistent
-with refraction through the curved cortical-bone interface of the
-macaque vault.
+profiles through the focal voxel.
 
 \begin{table}[H]
 \centering
 \caption{Macaque dACC focal metrics, $f_0=500$\,kHz, $D=$ROC$=45$\,mm,
-         MI = 1.0 derated (free-field).}
+         MI = 1.0 derated (free-field). Values from the production
+         Affine cavity + warped CHARM atlas (\S\S\ref{sec:cavity},
+         \ref{sec:registration}).}
 \label{tab:focal}
 \begin{tabular}{lr}
 \hline
@@ -627,17 +737,16 @@ Aperture $D$                         & 45\,mm \\
 ROC                                  & 45\,mm \\
 $f$-number                           & 1.0 \\
 Geometric focal $z$                  & 45.00\,mm \\
-Transcranial focal $z$               & 36.08\,mm \\
-Refraction shift                     & $-8.92$\,mm \\
+Transcranial focal $z$               & 37.84\,mm \\
+Refraction shift                     & $-7.16$\,mm \\
 MI target (derated, free-field)      & 1.0 \\
 PNP target                           & 0.707\,MPa \\
-Drive $p_0$ at source                & 78.3\,kPa \\
-Transcranial peak PNP at focus       & 0.705\,MPa ($-0.02$\,dB vs target) \\
-Transcranial focal $z$ shift         & $-8.92$\,mm vs geometric \\
+Drive $p_0$ at source                & 83.0\,kPa \\
+Transcranial peak PNP at focus       & 0.707\,MPa (matched by rescale) \\
 $\Delta x = \Delta y = \Delta z$     & 880\,$\mu$m \\
 $\Delta t$                           & 114\,ns \\
 Domain                               & $60 \times 60 \times 65$\,mm \\
-Solve wall time                      & $\sim$10\,s on single CPU core \\
+Solve wall time                      & 12.1\,s on single CPU core \\
 \hline
 \end{tabular}
 \end{table}
@@ -650,7 +759,7 @@ Solve wall time                      & $\sim$10\,s on single CPU core \\
          peak-normalised $|p|$ in dB on the same slice, and a $yz$
          sound-speed slice. \textbf{Bottom left}: on-axis pressure
          profile, with the geometric focus (45\,mm, grey dotted) and
-         transcranial focus (37.0\,mm, cyan dashed) marked.
+         transcranial focus (37.84\,mm, cyan dashed) marked.
          \textbf{Bottom centre}: through-focus lateral profiles in $x$
          and $y$. \textbf{Bottom right}: simulation parameter summary.}
 \label{fig:focal-field}
@@ -669,6 +778,133 @@ transmission measurement at 500\,kHz on the AMNH skull or a
 representative second specimen. These are deferred to follow-up work.
 
 % =============================================================================
+\appendix
+
+\section{Cavity-extraction trials and lessons}
+\label{app:cavity-trials}
+
+The production cavity recipe (\S\ref{sec:cavity}) was reached only
+after six rejected approaches. This appendix documents them so future
+species can skip the same dead ends; the lessons at the end generalise.
+
+\begin{table}[H]
+\centering
+\caption{Cavity-extraction trials at $250$\,$\mu$m. Final row is the
+         production recipe of \S\ref{sec:cavity}.}
+\label{tab:cavity-trials}
+\small
+\begin{tabular}{lll}
+\hline
+Approach & Volume & Failure mode \\
+\hline
+Closing only ($\le$15\,mm)        & $\le 1.2$\,mL & Cannot bridge orbits/temporal fossa \\
+Bone shell + 5\,mm closing + bbox    & $\sim$80\,mL  & Internal bone (petrous, sphenoid) splits CCs; flat caudal seal \\
+Bone shell + per-axial hull + curved floor/plug          & 80.3\,mL & Cleaner boundary, still mid-brain holes \\
+SyN warp of NMT mask to bone shell    & 95.0\,mL & SyN propagates soft-tissue indentations (longitudinal fissure) into mask \\
+Halle-style brain shrink-fit (uniform scale + grid translation) & 6.2\,mL & 5\,mm bone closing too thick at scale 1.0; binary search collapses to $s=0.40$ \\
+Bone-constrained geodesic propagation & 87.5\,mL & Includes non-brain pneumatic spaces (sinus, mastoid) \\
+\textbf{Affine warp of NMT mask + 2\,mm closing + bone clip}
+                                      & \textbf{88.4\,mL} & \textbf{Production} \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{cavity_trials_panel.png}
+\caption{Four of the trials in Table~\ref{tab:cavity-trials} rendered
+         as $3\times3$ orthoslice montages at the same world
+         coordinates.
+         \textbf{Top-left}: bone-shell with per-axial hull, curved
+         basicranium floor, and per-row rostral/caudal plugs at 1\,mm
+         working resolution (iter15, 80.3\,mL).
+         \textbf{Top-right}: SyN warp of NMT brain mask to bone-shell
+         cavity, with 8\,mm closing and bone clip (iter18, 95.5\,mL);
+         visible inward bump at the dorsal-anterior midline.
+         \textbf{Bottom-left}: bone-constrained geodesic propagation
+         (iter20, 87.5\,mL); small magenta pockets at sphenoid sinus,
+         mastoid air cells, and ear bullae.
+         \textbf{Bottom-right} (production, iter21, 87.0\,mL): Affine
+         warp + 2\,mm closing + bone clip.}
+\label{fig:cavity-trials}
+\end{figure}
+
+\paragraph{Why Affine and not SyN.}
+A SyN deformation between the bone-shell cavity (which retains a
+soft-tissue-shaped longitudinal-fissure indentation at the midline
+because the bone closing does not fully bridge the falx-cerebri space)
+and the NMT brain mask propagates that soft-tissue feature into the
+warped mask, yielding a $\sim$10\,mm wide indentation at the
+dorsal-anterior midline that no amount of post-warp closing fully
+removes ($\le$8\,mm closing leaves a residual; $>$8\,mm closing
+distorts the surrounding cortex). Affine, with only 12 DOF, cannot
+deform the mask locally to match such cavity-side artefacts -- the
+warped mask retains its smooth atlas topology, and the residual misfit
+at the basicranium is absorbed by the bone clip.
+
+\paragraph{Why not bone-constrained geodesic propagation.}
+Geodesic propagation from the largest bone-shell CC stays bone-bounded
+by construction (constraint: cannot cross bone or the outside
+envelope), so the boundary is bone-traced everywhere -- no
+soft-tissue tracking. But it over-includes the sphenoid sinus, the
+mastoid air cells, and the ear bullae because those pneumatic spaces
+share narrow bone-bounded paths with the brain cavity. The Affine
++ atlas-mask recipe avoids this because the brain mask's
+topology forbids the inclusion of non-brain pockets.
+
+\paragraph{Why shrink-fit collapses.}
+Halle-style shrink-fit applies a 5\,mm bone closing to bridge
+sutures, then binary-searches a uniform scale of the NMT brain mask
+such that the warped mask has zero bone overlap, then grid-searches
+translations to maximise distance from bone. At scale 1.0 the NMT
+mask placed at the cranium centroid has 16.6\% bone overlap (the
+5\,mm closing has thickened the constraint mask substantially), so
+the binary search collapses to $s=0.40$ and the recovered cavity is
+6.2\,mL. Halle's clinical CT has thinner cortical bone and the
+shrink-fit converges at $s\approx0.95$; the macaque dry-skull microCT
+does not because its bone walls are thicker in proportion to the
+brain and the closing-thickened constraint envelope shrinks the
+admissible region too aggressively.
+
+\paragraph{Lessons (carry over to other species).}
+\begin{enumerate}[leftmargin=*]
+\setlength\itemsep{0pt}
+  \item \emph{Don't deform a smooth atlas mask to fit a noisy cavity.}
+        Non-rigid registrations (ANTs SyN) propagate any cavity-side
+        irregularity (incomplete bone closing, falx-cerebri midline
+        indentation, soft-tissue features) into the warped mask. The
+        Affine equivalent (12 DOF) cannot deform locally, so the
+        warped mask retains its atlas topology.
+  \item \emph{The bone-shell cavity is a registration target, not the
+        production cavity.} A bone-shell with per-axial hull and
+        curved floor/plugs is good enough to drive ANTs Affine but
+        will always have internal-bone CC fragmentation. Use it to
+        produce the alignment, then take the warped atlas mask as the
+        production cavity.
+  \item \emph{Bone-as-constraint, not bone-as-target.} After warping,
+        clip the cavity against the species-specific bone mask
+        (\texttt{cavity \& \textasciitilde bone\_mask}). This sharpens
+        the boundary at the inner cortical table without reintroducing
+        the CC-fragmentation problem because the cavity already has
+        the correct large-scale topology.
+  \item \emph{Geodesic propagation captures too much.} Pneumatic
+        spaces (sinuses, mastoid air cells, ear bullae) share narrow
+        bone-bounded paths with the brain space and get included.
+        Use Affine + atlas mask + bone clip instead.
+  \item \emph{Shrink-fit is a fallback, not a default.} Halle-style
+        uniform shrink + translation grid search is robust when an
+        atlas mask does not exist or when the bone-as-constraint mask
+        is too thick (forcing the binary search to collapse to a
+        small scale). For species with a published brain atlas, the
+        Affine warp produces a much closer fit.
+  \item \emph{Affine is resolution-independent.} Fit the Affine at
+        the cheapest resolution that captures the brain shape (250
+        $\mu$m for macaque), then upsample the warped mask to native
+        for high-frequency acoustic-property mapping. Never re-fit
+        the registration at native resolution; only re-rasterise.
+\end{enumerate}
+
+% =============================================================================
 
 \begin{thebibliography}{99}
 \bibitem{copes-sci-data-2016} L.\,E.~Copes, L.\,A.~B.~Lucas,
@@ -676,41 +912,50 @@ representative second specimen. These are deferred to follow-up work.
   ``A collection of non-human primate computed tomography scans housed
   in MorphoSource, a repository for 3D data,''
   \emph{Sci.\ Data} {\bf 3}, 160001 (2016), doi:10.1038/sdata.2016.1.
-\bibitem{nmt-v2} B.~Jung, P.\,A.~Taylor, J.~Seidlitz \emph{et al.},
+\bibitem{nmt-v2} B.~Jung, P.\,A.~Taylor, J.~Seidlitz, C.~Sponheim,
+  P.~Perkins, L.\,G.~Ungerleider, D.~Glen, A.~Messinger,
   ``A comprehensive macaque fMRI pipeline and hierarchical atlas,''
-  \emph{NeuroImage} {\bf 235}, 117997 (2021).
+  \emph{NeuroImage} {\bf 235}, 117997 (2021),
+  doi:10.1016/j.neuroimage.2021.117997.
 \bibitem{d99} K.\,S.~Saleem and N.~Logothetis, \emph{A Combined MRI and
   Histology Atlas of the Rhesus Monkey Brain in Stereotaxic
   Coordinates}, 2nd ed., Academic Press (2012); D99~v2 NMT-aligned
   release in \cite{nmt-v2}.
-\bibitem{charm} B.~Jung, P.\,A.~Taylor, J.~Seidlitz \emph{et al.},
-  ``Cortical Hierarchy Atlas of the Rhesus Macaque (CHARM),''
-  \emph{NeuroImage} {\bf 224}, 117625 (2020).
-\bibitem{sarm} D.~M.~Hartig, B.~Jung \emph{et al.},
-  ``The Subcortical Atlas of the Rhesus Macaque (SARM),''
-  \emph{NeuroImage} {\bf 235}, 117996 (2021).
+\bibitem{charm} CHARM is the Cortical Hierarchy Atlas of the Rhesus
+  Macaque introduced in Jung \emph{et al.}~2021 alongside the NMT v2.0
+  template release; see \cite{nmt-v2} for the canonical paper.
+\bibitem{sarm} R.~Hartig, D.~Glen, B.~Jung, N.\,K.~Logothetis,
+  G.~Paxinos \emph{et al.},
+  ``The Subcortical Atlas of the Rhesus Macaque (SARM) for
+  neuroimaging,'' \emph{NeuroImage} {\bf 235}, 117996 (2021),
+  doi:10.1016/j.neuroimage.2021.117996.
 \bibitem{folloni} D.~Folloni, L.~Verhagen, R.\,B.~Mars \emph{et al.},
   ``Manipulation of subcortical and deep cortical activity in the
   primate brain using transcranial focused ultrasound stimulation,''
   \emph{Neuron} {\bf 101}(6), 1109--1116.e5 (2019).
-\bibitem{khalighinejad} N.~Khalighinejad, M.~Bongioanni, L.~Verhagen
-  \emph{et al.},
+\bibitem{khalighinejad} N.~Khalighinejad, A.~Bongioanni, L.~Verhagen,
+  D.~Folloni, D.~Attali \emph{et al.},
   ``A basal forebrain-cingulate circuit in macaques decides it is time
-  to act,'' \emph{Sci.\ Adv.} {\bf 6} (2020).
+  to act,'' \emph{Neuron} {\bf 105}(2), 370--384.e8 (2020),
+  doi:10.1016/j.neuron.2019.10.030.
 \bibitem{verhagen} L.~Verhagen, C.~Gallea, D.~Folloni \emph{et al.},
   ``Offline impact of transcranial focused ultrasound on cortical
   activation in primates,'' \emph{eLife} {\bf 8}, e40541 (2019).
-\bibitem{badran} B.\,W.~Badran \emph{et al.},
-  ``Low-intensity transcranial focused ultrasound to the dorsal
-  anterior cingulate attenuates acute pain perception,''
-  \emph{J.\ Neurosci.} {\bf 44}(8), e1011232023 (2024).
-\bibitem{rhesus-volume} M.~Rilling, R.~Insel \emph{et al.}; published
-  ranges: 70-110\,mL for adult \emph{Macaca mulatta}; mean ${\sim}$85\,mL
-  with male/female sexual dimorphism (males trend high).
+\bibitem{badran} A.~Strohman, B.~Payne, A.~In, K.~Stebbins, W.~Legon,
+  ``Low-intensity focused ultrasound to the human dorsal anterior
+  cingulate attenuates acute pain perception and autonomic responses,''
+  \emph{J.\ Neurosci.} {\bf 44}(8), e1011232023 (2024),
+  doi:10.1523/JNEUROSCI.1011-23.2023.
+\bibitem{rhesus-volume} J.\,K.~Rilling and T.\,R.~Insel,
+  ``The primate neocortex in comparative perspective using magnetic
+  resonance imaging,''
+  \emph{J.\ Hum.\ Evol.} {\bf 37}(2), 191--223 (1999),
+  doi:10.1006/jhev.1999.0313. Reports adult \emph{Macaca mulatta}
+  brain volumes in the 70--110\,mL range with mean ${\sim}$85\,mL.
 \bibitem{maga-validation} G.~F.~Pinton,
   ``Migrating the 15\,MHz transcranial mouse pipeline from DigiMouse to
   the Maga (UW) 4K microCT,'' validation report
-  \texttt{mouse\_therapy/validation\_report\_maga/manuscript.tex},
+  \texttt{tuba/docs/mouse/manuscript.pdf} (companion report),
   University of North Carolina at Chapel Hill (2026).
 \end{thebibliography}
 
