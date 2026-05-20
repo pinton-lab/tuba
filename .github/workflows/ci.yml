@@ -39,7 +39,7 @@ jobs:
           python -c "import tuba; print('tuba', tuba.__version__)"
           python -c "import tuba.core.frame, tuba.core.downsample, tuba.core.align, tuba.core.cavity, tuba.core.surface, tuba.core.slab, tuba.core.placement, tuba.core.qc; print('core OK')"
           python -c "import tuba.atlases.allen_ccfv3, tuba.atlases.mni152; print('atlases OK')"
-          python -c "import tuba.species.mouse, tuba.species.human; print('species OK')"
+          python -c "import tuba.species.mouse, tuba.species.human, tuba.species.macaque; print('species OK')"
           python -c "import tuba.io.nrrd, tuba.io.tiff_stack; print('io OK')"
 
       - name: Data manifest loads
