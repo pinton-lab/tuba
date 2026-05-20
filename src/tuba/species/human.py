@@ -86,8 +86,11 @@ OUTER_ENVELOPE_FALLBACK = os.path.join(REG_DIR, 'halle_outer_surface.npz')
 MNI_BRAIN_IN_HALLE   = os.path.join(REG_DIR, 'mni_brain_in_halle.nii.gz')
 MNI_T1_IN_HALLE      = os.path.join(REG_DIR, 'mni_t1_in_halle.nii.gz')
 
-# MNI152 atlas binding. Atlas files live in
-# neuromod_parameters/templates/mni152_icbm_2009a/.
+# MNI152 atlas binding. Atlas files cached under
+# ``$TUBA_HUMAN_REG_DIR/../templates/mni152_icbm_2009a/`` by default
+# (i.e. ``~/.cache/tuba/human/templates/mni152_icbm_2009a/``); pointing
+# TUBA_HUMAN_REG_DIR at the legacy ``neuromod_parameters/registration/``
+# directory preserves the legacy templates layout one level up.
 ATLAS = MNI152(
     atlas_dir=os.path.join(REG_DIR, '..', 'templates', 'mni152_icbm_2009a'))
 

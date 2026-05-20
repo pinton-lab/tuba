@@ -23,9 +23,9 @@
 % Diagonal "DRAFT" watermark on every page.  Comment out to disable.
 \RequirePackage{draftwatermark}
 \SetWatermarkText{DRAFT}
-\SetWatermarkScale{6}
-\SetWatermarkColor[gray]{0.92}
-\SetWatermarkAngle{55}
+\SetWatermarkScale{7}
+\SetWatermarkColor[gray]{0.80}
+\SetWatermarkAngle{45}
 
 \setlength{\parindent}{12pt}
 \setlength{\parskip}{0pt plus 1pt}

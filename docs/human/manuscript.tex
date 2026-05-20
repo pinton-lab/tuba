@@ -61,10 +61,12 @@ Halle NRRD (the file header is wrong), the Hounsfield-anchored piecewise-
 linear intensity-to-acoustic ramp used by the slab loader, and the
 coordinate-frame migration required to bring this pipeline under TUBA's
 ``world-mm everywhere'' convention. Source data is reproducible: the Halle
-volume is fetched from Zenodo by \texttt{setup/fetch\_halle\_skull.py}; the
-MNI152 ICBM 2009a non-linear symmetric template is fetched by
-\texttt{templates/fetch\_mni152.py}; processing modules live alongside the
-neuromod\_parameters pipeline in \texttt{registration/}.
+volume is fetched from Zenodo by \texttt{tuba.data.fetch\_human}; the
+MNI152 ICBM 2009a non-linear symmetric template and its parcellations
+are fetched lazily through \texttt{tuba.atlases.mni152} (nilearn-driven,
+with the catalogue under \texttt{tuba.atlases.mni152.PARCELLATIONS});
+the processing pipeline lives at \texttt{src/tuba/species/human.py} with
+intermediate caches in \texttt{\$TUBA\_HUMAN\_REG\_DIR}.
 \end{abstract}
 
 \section{Source data}\label{sec:source}
@@ -142,8 +144,10 @@ T1-weighted template~\cite{fonov2009}, a $1$\,mm isotropic average of 152
 adult subjects produced by the McConnell Brain Imaging Centre. The
 template ships with a companion brain mask
 (\texttt{mni\_icbm152\_t1\_tal\_nlin\_sym\_09a\_mask.nii}) and is cached
-in \texttt{templates/mni152\_icbm\_2009a/}; both are fetched by
-\texttt{templates/fetch\_mni152.py}.
+in the user's nilearn cache directory (typically
+\texttt{\textasciitilde/nilearn\_data/icbm152\_2009/}); both are fetched
+through \texttt{tuba.atlases.mni152} via
+\texttt{nilearn.datasets.fetch\_icbm152\_2009}.
 
 Two qualitative differences from the mouse Allen CCFv3 reference shape the
 rest of the pipeline:
@@ -354,9 +358,9 @@ where $v$ is the voxel pitch in mm. Using $\mathrm{diag}(-v,-v,+v,1)$
 $-y$ (RAS posterior), mirror-flipping the registration and breaking
 every downstream MNI overlay. The encoded affine and the documentation
 of the empirical disambiguation both live in
-\texttt{registration/halle\_constants.py}; downstream code that writes
-or reads the Halle volume {\em must} go through this module rather than
-trusting the NRRD header field.
+\texttt{tuba.species.human} (the \texttt{halle\_affine\_to\_ras} helper);
+downstream code that writes or reads the Halle volume {\em must} go
+through this module rather than trusting the NRRD header field.
 
 We do not run a per-slice bone-mass orientation probe analogous to the
 mouse's. The clinical CT comes off the scanner with the patient already
@@ -394,7 +398,7 @@ an in-between resolution.
 
 \section{No PCA pre-alignment}\label{sec:prealign}
 The mouse Maga pipeline rotates its native volume by PCA-derived Euler
-angles (manuscript \S5 of the mouse report; angles $(\alpha_x, \alpha_y,
+angles (\S5 of the mouse report~\cite{maga_manuscript}; angles $(\alpha_x, \alpha_y,
 \alpha_z) = (+8.07\,^\circ, +8.40\,^\circ, -19.51\,^\circ)$ for the
 Maga 4K scan) so that all downstream caches share a clean axis-aligned
 voxel grid centred at the cortical-bone centroid.
@@ -423,14 +427,15 @@ carry NRRD-voxel-mm coordinates (the only difference is a sign flip on
 the first component).
 
 A legacy landmark-based orientation refinement
-(\texttt{register\_orientation\_first.py}) exists, using a five-point
-Umeyama fit on nasion, inion, the two pre-auriculars, and the vertex.
-It is not invoked by the production pipeline because ANTs SyN handles
-the same residual orientation drift directly, and the landmark
-auto-detection produced noisier results than the SyN affine init in
-side-by-side QC. The script remains in \texttt{registration/} for
-reproducibility of historical figures but is not on the current code
-path.
+(\texttt{neuromod\_parameters/\allowbreak registration/\allowbreak
+register\_orientation\_first.py}; not ported into TUBA) exists, using
+a five-point Umeyama fit on nasion, inion, the two pre-auriculars, and
+the vertex. It is not invoked by the production pipeline because ANTs
+SyN handles the same residual orientation drift directly, and the
+landmark auto-detection produced noisier results than the SyN affine
+init in side-by-side QC. The script is retained in the legacy
+\texttt{neuromod\_parameters} layout for reproducibility of historical
+figures but is not on the TUBA code path.
 
 \section{Outer-bone-table extraction}\label{sec:surface}
 Because MNI is a head template and not a brain-only template,
@@ -448,7 +453,9 @@ surfaces, and only one of them is correct for transducer placement.
 
 \subsection{Morphological close+fill ($\sim$22\,mm)}
 \label{sec:surface_closefill}
-\texttt{registration/extract\_halle\_surface.py} takes the
+The legacy
+\texttt{neuromod\_parameters/\allowbreak registration/\allowbreak
+extract\_halle\_surface.py} (not ported into TUBA) takes the
 $\mathrm{HU}\geq 700$ bone mask at 1\,mm working pitch, applies a 22\,mm
 morphological closing (a ball-shaped structuring element large enough
 to bridge the foramen magnum ($\sim$30\,mm), the orbital openings, and
@@ -469,14 +476,16 @@ into the skull, which is not where a transducer can physically be
 mounted.
 
 The close+fill mesh is retained as the {\em fallback} input to
-\texttt{halle\_placement.py} in case the ray-cast cache below has not
-been generated, and as a registration-target proxy for the legacy
-landmark-based scripts.
+\texttt{tuba.species.human.\allowbreak place\_on\_skull} (resolved via
+\texttt{OUTER\_ENVELOPE\_FALLBACK}) in case the ray-cast cache below
+has not been generated, and as a registration-target proxy for the
+legacy landmark-based scripts.
 
 \subsection{Ray-cast outer table (the production path)}
 \label{sec:surface_raycast}
-\texttt{registration/extract\_outer\_bone\_surface.py} solves the
-inner-table problem by ray-casting outward from the bone-mass centroid.
+\texttt{tuba.species.human.\allowbreak extract\_outer\_bone\_surface}
+solves the inner-table problem by ray-casting outward from the
+bone-mass centroid.
 At a 1\,mm working pitch:
 
 \begin{enumerate}
@@ -560,8 +569,8 @@ and inverse transforms returned by ANTs cover both directions equally
 either way, so the choice of which is ``fixed'' is a UX optimisation.
 
 \paragraph{Saved artefacts.}
-The forward + inverse transforms are persisted to
-\texttt{registration/ants\_transforms/} and indexed by stable text
+The forward + inverse transforms are persisted under
+\texttt{\$TUBA\_HUMAN\_REG\_DIR} and indexed by stable text
 lists:
 
 \begin{itemize}
@@ -1103,8 +1112,9 @@ forward to any future clinical-CT case:
 \item {\em Trust the data, not the NRRD header.} The Halle release tags
   the volume as LPS but stores it as LAS. The disambiguation must be
   done empirically (slice-viewer inspection) and the result baked into
-  a constant module (\texttt{halle\_constants.py}); downstream code
-  must not re-derive the storage convention from the header.
+  the species module (\texttt{tuba.species.human.\allowbreak
+  halle\_affine\_to\_ras}); downstream code must not re-derive the
+  storage convention from the header.
 \item {\em Outer table $\neq$ outer envelope.} The morphological
   close+fill envelope of \S\ref{sec:surface_closefill} is correct for
   registration-target generation against a head template, but it sits
@@ -1163,7 +1173,7 @@ forward to any future clinical-CT case:
 \begin{thebibliography}{99}
 \bibitem{halle_zenodo}
 Halle skull microCT release, Anatomical Institute Halle, Zenodo.
-Accessed 2026-04 via \texttt{setup/fetch\_halle\_skull.py}.
+Accessed 2026-04 via \texttt{tuba.data.fetch\_human}.
 \bibitem{fonov2009}
 V.~Fonov, A.~C.~Evans, K.~Botteron, C.~R.~Almli, R.~C.~McKinstry,
 D.~L.~Collins, and the Brain Development Cooperative Group,

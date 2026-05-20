@@ -59,9 +59,13 @@ ANTs-SyN registration of Allen CCFv3 to that cavity, the acoustic-property
 mapping in the absence of a hydroxyapatite phantom, and a side-by-side
 comparison of predicted focal pressure and aberration against the
 DigiMouse baseline. Source data is reproducible: the Maga zip is
-staged with \texttt{templates/fetch\_maga\_skull.py}; processing
-modules live alongside the DigiMouse pipeline in
-\texttt{registration/}.
+staged with \texttt{tuba.data.fetch\_mouse}; the Maga processing
+pipeline (orientation, alignment, cavity extraction, SyN registration,
+slab loading, bowl placement) lives at \texttt{src/tuba/species/mouse.py}
+with intermediate caches in \texttt{\$TUBA\_MOUSE\_REG\_DIR}. The
+DigiMouse baseline used for the comparison in \S\ref{sec:comparison} is
+the legacy \texttt{mouse\_therapy/registration/} implementation (not
+ported into TUBA).
 \end{abstract}
 
 % =============================================================================
@@ -97,8 +101,9 @@ $\sim$5.7\,GB.
 atlas~\cite{digimouse} provides a coregistered whole-body $380 \times 992
 \times 208$ volume at 100\,$\mu$m isotropic from a single nude male
 adult, including soft-tissue contrast (from cryosection-aligned CT)
-and PET. The pipeline currently in
-\texttt{registration/}\allowbreak\texttt{mouse\_ct\_constants.py}
+and PET. The legacy DigiMouse pipeline in
+\texttt{mouse\_therapy/\allowbreak registration/\allowbreak mouse\_ct\_constants.py}
+(not ported into TUBA; retained as the comparison baseline)
 resamples this to
 200\,$\mu$m for ANTs ingest. The Maga 4K scan replaces the DigiMouse
 CT specifically for skull modeling: it carries no soft tissue but
@@ -170,10 +175,11 @@ distributed by the Allen Institute alongside a hierarchical
 parcellation of $\sim$670 anatomical structures~\cite{allen-ccfv3}.
 The template ships at three isotropic resolutions (10, 25, and
 50\,$\mu$m); we cache the 10\,$\mu$m template and annotation locally as
-\texttt{registration/}\allowbreak\texttt{allen\_template\_10um.nii.gz}
-and \texttt{allen\_annotation\_10um.nii.gz} (1140${\times}$1320${\times}$800
-voxels, $\sim$11.4${\times}$13.2${\times}$8.0\,mm$^3$, RAS-affined) via
-\texttt{templates/fetch\_allen\_ccfv3.py}, and use the 25\,$\mu$m
+\texttt{allen\_template\_10um.nii.gz} and
+\texttt{allen\_annotation\_10um.nii.gz} (1140${\times}$1320${\times}$800
+voxels, $\sim$11.4${\times}$13.2${\times}$8.0\,mm$^3$, RAS-affined) under
+\texttt{\$TUBA\_MOUSE\_REG\_DIR} via
+\texttt{tuba.data.fetch\_allen}, and use the 25\,$\mu$m
 companion volumes as the moving/fixed images for the SyN registration
 in \S\ref{sec:registration}.
 
@@ -248,8 +254,8 @@ at positive $y$ and the brain compartment as a smooth oval cavity at
 negative $y$, and the axial section shows the same arrangement (intricate
 turbinate bone at $+y$, smooth cranial outline at $-y$). The slice
 axis is therefore flipped in
-\texttt{registration/maga\_skull\_constants.py} (\texttt{SLICE\_FLIP =
-True}) so that the RAS-aligned NIfTI satisfies the convention
+\texttt{tuba.species.mouse} (\texttt{SLICE\_FLIP = True}) so that the
+RAS-aligned NIfTI satisfies the convention
 $+y = \mathrm{anterior}$. The secondary bone-mass peak at storage
 slice $\sim$3570 corresponds anatomically to the dense incisor /
 ethmoid-turbinate region just caudal of the rostral tip.
@@ -265,7 +271,7 @@ voxels respectively. The only structure with this density profile is
 the basicranium (palate, basisphenoid, petrosal), which is
 anatomically ventral. Storage high-$k$ therefore corresponds to
 ventral, and \texttt{COL\_FLIP = True} is set in
-\texttt{maga\_skull\_constants.py} so that the output volume satisfies
+\texttt{tuba.species.mouse} so that the output volume satisfies
 $+z = \mathrm{dorsal}$ in RAS. A naive bone-vs-cavity centroid test
 gives a misleading positive ($z_{\mathrm{cavity}} - z_{\mathrm{bone}} =
 +0.5$\,mm) because the brain cavity occupies the upper-middle of the
@@ -302,9 +308,8 @@ The native 6.127\,$\mu$m volume is too large for direct ANTs SyN
 registration ($\sim$38\,GB float32). We provide a streaming
 block-max downsampler that produces a clean RAS-affined NIfTI at any
 target voxel pitch that is an integer multiple of the native pitch
-(see \texttt{downsample\_to} in
-\texttt{registration/}\allowbreak\texttt{maga\_skull\_constants.py}).
-The default 200\,$\mu$m
+(see \texttt{tuba.species.mouse.\allowbreak downsample\_to\_200um} /
+\texttt{downsample\_to\_50um}). The default 200\,$\mu$m
 cache uses a factor-of-33 reduction (200\,$\mu$m / 6.127\,$\mu$m $=
 32.65$, rounded to 33, giving an actual pitch of 202.2\,$\mu$m); a
 50\,$\mu$m cache (factor 8, $\sim$6\,GB float32) is also provided for
@@ -364,7 +369,7 @@ applied to the native TIFF stack to produce
 \texttt{maga\_skull\_aligned\_native.\allowbreak nii.gz} (uint16,
 streamed in memory; see
 \texttt{align\_skull\_to\_axes} and \texttt{align\_native\_to\_axes} in
-\texttt{maga\_skull\_constants.py}). In the same step the cortical-bone
+\texttt{tuba.species.mouse}). In the same step the cortical-bone
 centroid is translated to the volume centre so the brain cavity sits at
 the world origin. The output volume is padded by 12 voxels on each
 side (200\,$\mu$m cache) or 396 voxels (native), so that
@@ -389,8 +394,8 @@ all downstream slice plots cleanly axis-aligned.
 \label{sec:cavity}
 
 The DigiMouse cavity extractor
-(\texttt{registration/}\allowbreak\texttt{extract\_mouse\_cavity.py})
-contains $\sim$300 lines and must solve several problems specific to
+(legacy \texttt{mouse\_therapy/registration/\allowbreak extract\_mouse\_cavity.py};
+not in TUBA) contains $\sim$300 lines and must solve several problems specific to
 the whole-body scan: detecting the skull-base $k$ slice from the
 contrast between vault and basal-skull bone fractions, plugging the
 foramen magnum to seal the spinal column, and per-slice connected-component
@@ -399,7 +404,7 @@ the nasal sinuses, orbits, and oral cavity. None of these are needed
 for the Maga dry skull -- the scan contains no spine, no mandible, no
 soft tissue, and no body posterior to the occiput. We therefore
 re-implement the extractor as
-\texttt{registration/}\allowbreak\texttt{extract\_maga\_cavity.py}.
+\texttt{tuba.species.mouse.\allowbreak extract\_cavity}.
 
 The principal residual challenge is intensity-distribution shape. The
 log-binned histogram of the native volume (Fig.~\ref{fig:histogram})
@@ -547,9 +552,11 @@ source intensity volume.
 We register the extracted Maga endocranial cavity to the Allen
 CCFv3 brain template using ANTs SyN, exactly mirroring the DigiMouse
 pipeline
-(\texttt{registration/}\allowbreak\texttt{register\_cavity\_to\_allen.py})
-with Maga-specific inputs and outputs. The Maga-version script
-(\texttt{registration/}\allowbreak\texttt{register\_maga\_}\allowbreak\texttt{cavity\_to\_allen.py})
+(legacy \texttt{mouse\_therapy/registration/\allowbreak register\_cavity\_to\_allen.py};
+not in TUBA)
+with Maga-specific inputs and outputs. The Maga-version registration
+(\texttt{tuba.species.mouse.\allowbreak register\_to\_atlas} and
+\texttt{warp\_atlas\_into\_maga})
 reads
 \texttt{maga\_cranial\_cavity.nii.gz} as the moving image, the
 binarised Allen brain mask (template intensity $> 5$\,\% of max) as
@@ -596,7 +603,7 @@ side-by-side view of how the Allen Common Coordinate Framework maps
 onto the actual skull. The match of the smooth cavity contour (cyan)
 to the lateral boundary of the colour-coded brain in every orthoslice
 is the principal L-R / D-V sanity check: had any axis flag in
-\texttt{maga\_skull\_constants.py} been wrong, or the rigid
+\texttt{tuba.species.mouse} been wrong, or the rigid
 pre-alignment (\S\ref{sec:align}) failed, the warped atlas would
 either fail to fit or would mirror across the midline. The current
 result shows the atlas filling the cavity within the $\sim$25\,$\mu$m
@@ -634,7 +641,8 @@ The transcranial FDTD and angular-spectrum simulations require per-voxel
 maps of sound speed $c(\mathbf{r})$, density $\rho(\mathbf{r})$, and
 attenuation $\alpha(\mathbf{r})$. The DigiMouse pipeline derives these
 from the uint8 mouseCT byte values via a piecewise-linear ramp defined
-in \texttt{registration/mouse\_skull\_slab\_3d.py}: voxels below the
+in legacy \texttt{mouse\_therapy/registration/\allowbreak mouse\_skull\_slab\_3d.py}
+(not in TUBA): voxels below the
 soft-to-bone threshold (byte 210) are assigned water-equivalent
 properties ($c=1540$\,m/s, $\rho=1000$\,kg/m$^3$), while bone voxels
 ramp linearly to cortical-bone values ($c=2900$\,m/s,
@@ -652,14 +660,13 @@ log records no hydroxyapatite step-wedge phantom or HU calibration
 (Table~\ref{tab:scan-params}, Table~\ref{tab:source-compare}), so the
 uint16 NRecon counts cannot be bound to absolute mineral-density units.
 We adapt the DigiMouse mapping with three changes, implemented in
-\texttt{registration/}\allowbreak\texttt{maga\_skull\_}\allowbreak\texttt{slab\_3d.py}.
-The Maga slab loader exposes the same
-\texttt{load\_maga\_skull\_slab\_3d(apex\_voxel\_mm, beam\_3d,
-slab\_size\_m, dx\_target\_m)} signature as the DigiMouse
-\texttt{load\_mouse\_skull\_slab\_3d} so the FDTD/angular-spectrum
-driver in \texttt{run\_mouse\_cc.py} is drop-in compatible (only the
-skull import and the placement helper differ between the two
-pipelines).
+\texttt{tuba.species.mouse.\allowbreak load\_slab}. The Maga slab
+loader exposes the same
+\texttt{load\_slab(apex\_world\_mm, beam\_3d, slab\_size\_m, dx\_target\_m)}
+signature as \texttt{tuba.species.\{macaque,human\}.load\_slab} and as
+the legacy DigiMouse \texttt{load\_mouse\_skull\_slab\_3d}, so any
+FDTD or angular-spectrum driver wired against one species runs on the
+other unchanged (only the species module changes).
 
 \paragraph{Mapping function.} The histogram of \S\ref{sec:cavity},
 Fig.~\ref{fig:histogram}, resolves three populations: air ($<100$
@@ -744,15 +751,15 @@ relative effect of replacing the DigiMouse skull volume with the Maga
 \section{Focal-prediction comparison}
 \label{sec:comparison}
 
-The forward simulation in
-\texttt{run\_mouse\_cc.py} is now skull-agnostic: a
-\texttt{MOUSE\_CC\_SKULL}~$\in\{$\texttt{digimouse},
-\texttt{maga}$\}$ environment variable selects between the
-\texttt{mouse\_skull\_slab\_3d} / \texttt{mouse\_placement} pair
-(DigiMouse) and the
-\texttt{maga\_skull\_slab\_3d} / \texttt{maga\_placement} pair
-(Maga 4K), without otherwise changing the bowl geometry, drive level,
-target convention, FDTD/angular-spectrum grid, attenuation model, or
+The forward simulation that produced
+Table~\ref{tab:focal-comparison} and Fig.~\ref{fig:focal-comparison}
+ran the same skull-agnostic driver against both species; the legacy
+\texttt{mouse\_therapy/run\_mouse\_cc.py} dispatched on the slab-loader
+/ placement-helper pair for each species (DigiMouse via
+\texttt{mouse\_skull\_slab\_3d} / \texttt{mouse\_placement}, Maga 4K
+via the equivalents now consolidated in \texttt{tuba.species.mouse}),
+without otherwise changing the bowl geometry, drive level, target
+convention, FDTD/angular-spectrum grid, attenuation model, or
 post-processing. Both pipelines focus a 10\,mm-aperture / 10\,mm-ROC
 ($f/1$) bowl at $f_0=15$\,MHz on the cranial-cavity centroid, with a
 3-cycle tone burst and a drive level calibrated post-hoc so that the
@@ -773,11 +780,9 @@ classifies bone by intensity alone over the full slab.
 
 \paragraph{Results.}
 Table~\ref{tab:focal-comparison} reports the focal-spot metrics
-extracted from both runs by
-\texttt{validation\_report\_maga/make\_focal\_comparison.py}.
-Fig.~\ref{fig:focal-comparison} shows the corresponding skull
-cross-sections, $|p|$-fields (peak-normalised in dB), and on-axis /
-lateral pressure profiles through the focal peak.
+extracted from both runs. Fig.~\ref{fig:focal-comparison} shows the
+corresponding skull cross-sections, $|p|$-fields (peak-normalised in
+dB), and on-axis / lateral pressure profiles through the focal peak.
 
 \begin{table}[H]
 \centering
@@ -839,10 +844,8 @@ FWHM axial $z$ (mm) & 1.457 & 1.356 & $-0.101$ \\
 the angular-spectrum solver has its own coordinate frame (lateral /
 elevation / depth, aligned to the bowl axis); to read off which Allen
 CCFv3 structures the focal field intersects, we resample the
-intensity volume from the slab grid back into the Allen frame. This
-is implemented in
-\texttt{validation\_report\_maga/}\allowbreak
-\texttt{make\_intensity\_on\_atlas.py}: each voxel of the Maga 25\,$\mu$m
+intensity volume from the slab grid back into the Allen frame: each
+voxel of the Maga 25\,$\mu$m
 aligned cache is projected onto the slab basis
 $(\mathbf{t}_1, \mathbf{t}_2, \mathbf{beam})$ defined by the
 placement, the intensity is sampled by linear interpolation, and the
@@ -1034,16 +1037,17 @@ numerics replaced by its NHP-scale analogue:
       Attenuation coefficients ($\alpha_{\mathrm{bone}}$,
       $\alpha_{\mathrm{tissue}}$) scale with the frequency chosen in
       the previous step.
-\item Placement helper analogous to \texttt{maga\_placement.py}:
-      extract the target centroid from the warped annotation,
+\item Placement helper analogous to
+      \texttt{tuba.species.mouse.\allowbreak place\_on\_skull}: extract
+      the target centroid from the warped annotation,
       project to the closest dorsal outer-bone surface point, apply
       scalp clearance / apex-to-target geometry and an optional
       sagittal-plane tilt.
-\item Forward simulation: the same
-      \texttt{run\_mouse\_cc.py}-style driver with the placement
-      helper / slab loader pair swapped for the NHP versions, and the
-      drive calibration (free-field MI target $\to$ post-hoc
-      $p_0$ rescaling) preserved unchanged.
+\item Forward simulation: the same driver pattern with the placement
+      helper / slab loader pair swapped for the NHP versions
+      (\texttt{tuba.species.macaque} or similar), and the drive
+      calibration (free-field MI target $\to$ post-hoc $p_0$ rescaling)
+      preserved unchanged.
 \item Focal-prediction comparison against a reference skull volume
       (a coarser generic-primate skull template if available, or
       absolute numbers if not) using the same Pa / dB / MPa / FWHM /

@@ -10,20 +10,24 @@ section.
 
 ```
 docs/
+├── compactarticle.cls     shared compact-article class (symlinked from each subdir)
 ├── mouse/                 Maga 4K microCT + Allen CCFv3 (cavity_binary mode)
-│   ├── manuscript.tex     18-page IOP-style narrative
+│   ├── manuscript.tex     17-page narrative with DigiMouse-vs-Maga focal comparison
 │   ├── manuscript.pdf
-│   ├── iopjournal.cls
-│   └── figures/           native-resolution validation figures
-├── macaque/               AMNH macaque + NMT v2 (cavity_binary mode, in progress)
-│   ├── manuscript.tex     9-page draft
+│   ├── compactarticle.cls -> ../compactarticle.cls
+│   ├── figures/           native-resolution validation figures
+│   └── tables/            scan_params.tex, source_compare.tex
+├── macaque/               AMNH macaque + NMT v2 (cavity_binary mode)
+│   ├── manuscript.tex     16-page narrative with 9 figures + cavity-trials appendix
 │   ├── manuscript.pdf
-│   ├── iopjournal.cls
-│   └── figures/
+│   ├── compactarticle.cls -> ../compactarticle.cls
+│   ├── make_atlas_figure.py            regenerates nmt_atlases.png (NMT-native)
+│   ├── make_atlas_in_macaque_figure.py regenerates nmt_atlases_in_macaque.png
+│   └── figures/           includes cavity_trials_panel.png ablation grid
 └── human/                 Halle Zenodo + MNI152 (intensity mode)
     ├── manuscript.tex     16-page narrative with 6 figures
     ├── manuscript.pdf
-    ├── iopjournal.cls
+    ├── compactarticle.cls -> ../compactarticle.cls
     ├── make_figures.py    regenerable: fig1–fig6 from registered NIfTIs
     ├── warp_atlases.py    warps the 6 PARCELLATIONS atlases to Halle space
     └── figures/           fig1_halle_native, fig2_mni_template, …, fig6_extra_parcellations_on_halle
@@ -31,7 +35,7 @@ docs/
 
 ## Building a manuscript
 
-Each `manuscript.tex` is an IOP-journal LaTeX document. Build with:
+Each `manuscript.tex` uses the shared `compactarticle.cls`. Build with:
 
 ```sh
 cd docs/<species>
@@ -39,8 +43,8 @@ pdflatex manuscript
 pdflatex manuscript    # second pass for cross-references
 ```
 
-The `iopjournal.cls` is co-located in each subdirectory so the build
-is self-contained.
+The `compactarticle.cls` symlink in each subdirectory points back to
+`docs/compactarticle.cls` so the build is self-contained.
 
 ## Regenerating the human figures
 
@@ -63,8 +67,8 @@ pdflatex manuscript
 | 3  | Orientation determination   | Orientation                 | Orientation (LAS-vs-LPS) |
 | 4  | Downsampling                | Downsampling                | Downsampling           |
 | 5  | PCA pre-alignment           | PCA pre-alignment           | No pre-alignment       |
-| 6  | Cavity extraction           | Cavity extraction           | Outer-bone surface (raycast + close+fill) |
-| 7  | ANTs SyN to atlas           | ANTs SyN to atlas           | ANTs SyN intensity + 6 warped atlases |
+| 6  | Cavity extraction           | Cavity extraction (Affine NMT warp + bone clip; 6-row trials table) | Outer-bone surface (raycast + close+fill) |
+| 7  | ANTs SyN to atlas           | ANTs **Affine** to atlas (SyN deforms soft-tissue features into mask) | ANTs SyN intensity + 6 warped atlases |
 | 8  | Acoustic-property mapping   | Acoustic-property mapping   | Acoustic-property mapping |
 | 9  | Focal-prediction comparison | Focal-prediction comparison | Placement (perpendicular-to-skull) |
 | 10 | Extension to NHP            | Extension to clinical       | Slab loader            |
@@ -89,6 +93,52 @@ genuinely new design choice in the final lessons section.
 LaTeX numbers figures by document order, which differs from the
 file-name ordering — every cross-reference inside the PDF resolves
 correctly via `\ref{fig:halle_native}` etc.
+
+## Cavity-extraction lessons (carry over to a fourth species)
+
+These lessons emerged from the macaque pipeline (six rejected approaches
+documented as the trials table in `docs/macaque/manuscript.tex`,
+§Endocranial cavity extraction). They apply to any species whose
+cranium has multiple anatomical openings larger than a few mm
+(orbits, foramen magnum, temporal fossa, choanae) — which is to say,
+any vertebrate larger than a mouse.
+
+1. **Don't deform a smooth atlas mask to fit a noisy cavity.**
+   Non-rigid registration (ANTs SyN) propagates any cavity-side
+   irregularity (incomplete bone closing, falx-cerebri midline
+   indentation, soft-tissue features) into the warped mask. The
+   Affine equivalent (12 DOF) cannot deform locally, so the warped
+   mask retains its atlas topology.
+2. **Bone-shell cavity is a registration target, not the production
+   cavity.** A bone-shell with per-axial hull and curved floor/plugs
+   is good enough to drive ANTs Affine but will always have
+   internal-bone CC fragmentation. Use it to produce the alignment,
+   then take the warped atlas mask as the production cavity.
+3. **Bone-as-constraint, not bone-as-target.** After warping, clip
+   the cavity against the species-specific bone mask
+   (`cavity & ~bone_mask`). Sharpens the boundary at the inner
+   cortical table without reintroducing CC fragmentation.
+4. **Geodesic propagation captures too much.** Pneumatic spaces
+   (sinuses, mastoid air cells, ear bullae) share narrow bone-bounded
+   paths with the brain space and get included.
+5. **Shrink-fit (Halle) is a fallback, not a default.** Halle-style
+   uniform shrink + translation grid search is robust when an atlas
+   mask does not exist or when bone-as-constraint is too thick. For
+   species with a published brain atlas, the Affine warp produces a
+   much closer fit.
+6. **Affine is resolution-independent.** Fit at the cheapest
+   resolution that captures the brain shape (250 µm for macaque),
+   then upsample the warped mask to native (60 µm) for high-frequency
+   acoustic-property mapping. Never re-fit the registration at
+   native resolution; only re-rasterise.
+
+The mouse pipeline (small skull, small foramina) gets away with pure
+hysteresis-threshold-plus-closing (~1 mm closing seals all foramina);
+the human pipeline (clinical CT, no atlas at hand) uses Halle
+shrink-fit. The macaque sits between, and the Affine + atlas-mask +
+bone-clip recipe is the one that works for both atlas-rich and
+medium-foramen species. A marmoset/rat port should start with this
+recipe.
 
 ## Citing the manuscripts
 

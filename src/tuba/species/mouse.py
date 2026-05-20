@@ -2,8 +2,7 @@
 
 Reference: Pinton, *Migrating the 15 MHz transcranial mouse pipeline
 from DigiMouse to the Maga (UW) 4K microCT*, in
-``mouse_therapy/validation_report_maga/manuscript.tex`` (sections cited
-below as §N).
+``tuba/docs/mouse/manuscript.tex`` (sections cited below as §N).
 
 Scan (manuscript §1, Table 1)
 -----------------------------
