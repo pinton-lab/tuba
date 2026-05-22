@@ -93,14 +93,23 @@ def affine_world_axes(arr_shape, affine):
 
 
 def apply_axis_flips(arr, slice_flip=False, row_flip=False, col_flip=False,
-                     transpose_to_ras=True):
+                     swap_row_col=False, transpose_to_ras=True):
     """Apply storage-axis flips and optional (slice, row, col) -> (i, j, k)
     transpose to a 3D array.
 
-    The transpose convention is the mouse/macaque microCT one:
-    raw storage is (slice=AP, row=LR, col=DV); after transpose the
+    The base transpose convention is the mouse one: raw storage is
+    (slice=AP, row=LR, col=DV); after the closing transpose(1,0,2) the
     array is in RAS index order (i=LR, j=AP, k=DV).
+
+    Some scanners (macaque AMNH, DigiMorph rat) store
+    (slice=AP, row=DV, col=LR) instead -- row and col are swapped
+    relative to mouse. Set ``swap_row_col=True`` to do a transpose(0,2,1)
+    before the per-axis flips, restoring the mouse convention so the
+    SLICE_FLIP / ROW_FLIP / COL_FLIP semantics and the closing
+    transpose remain unchanged.
     """
+    if swap_row_col:
+        arr = arr.transpose(0, 2, 1)
     if slice_flip:
         arr = arr[::-1, :, :]
     if row_flip:

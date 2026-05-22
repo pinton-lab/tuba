@@ -24,13 +24,22 @@ docs/
 │   ├── make_atlas_figure.py            regenerates nmt_atlases.png (NMT-native)
 │   ├── make_atlas_in_macaque_figure.py regenerates nmt_atlases_in_macaque.png
 │   └── figures/           includes cavity_trials_panel.png ablation grid
-└── human/                 Halle Zenodo + MNI152 (intensity mode)
-    ├── manuscript.tex     16-page narrative with 6 figures
+├── human/                 Halle Zenodo + MNI152 (intensity mode)
+│   ├── manuscript.tex     16-page narrative with 6 figures
+│   ├── manuscript.pdf
+│   ├── compactarticle.cls -> ../compactarticle.cls
+│   ├── make_figures.py    regenerable: fig1–fig6 from registered NIfTIs
+│   ├── warp_atlases.py    warps the 6 PARCELLATIONS atlases to Halle space
+│   └── figures/           fig1_halle_native, fig2_mni_template, …, fig6_extra_parcellations_on_halle
+└── rat/                   DigiMorph TMM M-2272 + Waxholm Space (Affine mode)
+    ├── manuscript.tex     11-page narrative with 6 figures
     ├── manuscript.pdf
     ├── compactarticle.cls -> ../compactarticle.cls
-    ├── make_figures.py    regenerable: fig1–fig6 from registered NIfTIs
-    ├── warp_atlases.py    warps the 6 PARCELLATIONS atlases to Halle space
-    └── figures/           fig1_halle_native, fig2_mni_template, …, fig6_extra_parcellations_on_halle
+    ├── make_figures.py    regenerable: intensity_histogram, bone_mass_profile,
+    │                      whs_atlas, registration_qc (cavity_qc emitted by pipeline)
+    └── figures/           native_orthoslices, world_orthoslices_240um,
+                           intensity_histogram, bone_mass_profile, whs_atlas,
+                           native_axial_anchors, cavity_qc, registration_qc
 ```
 
 ## Building a manuscript
@@ -60,19 +69,19 @@ pdflatex manuscript
 
 ## Section parity across species
 
-| §  | Mouse                       | Macaque                     | Human                  |
-|----|-----------------------------|-----------------------------|------------------------|
-| 1  | Source data                 | Source data                 | Source data            |
-| 2  | Allen CCFv3 reference       | NMT v2 reference            | MNI152 reference + 6 parcellations |
-| 3  | Orientation determination   | Orientation                 | Orientation (LAS-vs-LPS) |
-| 4  | Downsampling                | Downsampling                | Downsampling           |
-| 5  | PCA pre-alignment           | PCA pre-alignment           | No pre-alignment       |
-| 6  | Cavity extraction           | Cavity extraction (Affine NMT warp + bone clip; 6-row trials table) | Outer-bone surface (raycast + close+fill) |
-| 7  | ANTs SyN to atlas           | ANTs **Affine** to atlas (SyN deforms soft-tissue features into mask) | ANTs SyN intensity + 6 warped atlases |
-| 8  | Acoustic-property mapping   | Acoustic-property mapping   | Acoustic-property mapping |
-| 9  | Focal-prediction comparison | Focal-prediction comparison | Placement (perpendicular-to-skull) |
-| 10 | Extension to NHP            | Extension to clinical       | Slab loader            |
-| 11 | —                           | —                           | TUBA migration + 4 lessons |
+| §  | Mouse                       | Macaque                     | Human                  | Rat                                |
+|----|-----------------------------|-----------------------------|------------------------|------------------------------------|
+| 1  | Source data                 | Source data                 | Source data            | Source data                        |
+| 2  | Allen CCFv3 reference       | NMT v2 reference            | MNI152 + 6 parcellations | Waxholm Space v4.01 reference   |
+| 3  | Orientation determination   | Orientation                 | Orientation (LAS-vs-LPS) | Orientation (+ `swap_row_col`)   |
+| 4  | Downsampling                | Downsampling                | Downsampling           | Downsampling + skipped PCA         |
+| 5  | PCA pre-alignment           | PCA pre-alignment           | No pre-alignment       | (folded into §4 — none needed)     |
+| 6  | Cavity extraction           | Cavity (Affine NMT warp + bone clip) | Outer-bone surface (raycast + close+fill) | Cavity (Affine WHS warp + bone clip) |
+| 7  | ANTs SyN to atlas           | ANTs **Affine** to atlas (SyN deforms soft-tissue features into mask) | ANTs SyN intensity + 6 warped atlases | ANTs **Affine** to atlas (reused §6 matrix) |
+| 8  | Acoustic-property mapping   | Acoustic-property mapping   | Acoustic-property mapping | Acoustic-property mapping       |
+| 9  | Focal-prediction comparison | Focal-prediction comparison | Placement (perp-to-skull) | Placement (+ slab loader)       |
+| 10 | Extension to NHP            | Extension to clinical       | Slab loader            | Calibration trail (3 lessons)      |
+| 11 | —                           | —                           | TUBA migration + 4 lessons | Open items (SHA pins, native cavity, focal sim) |
 
 The structural parallelism is deliberate: when porting a fourth
 species (marmoset, rat, etc.) one follows the same template,

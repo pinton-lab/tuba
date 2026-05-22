@@ -1,0 +1,894 @@
+% DigiMorph TMM M-2272 rat skull microCT + Waxholm Space SD rat atlas.
+% Calibrated against the staged TMM M-2272 stack and WHS v4.01 atlas.
+% Build:
+%   pdflatex manuscript
+%   pdflatex manuscript
+
+\documentclass{compactarticle}
+
+\usepackage{amsmath,amssymb,amsfonts,bm}
+\usepackage{graphicx}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{ragged2e}
+\usepackage{url}
+
+\graphicspath{{figures/}}
+
+\providecommand{\br}{\toprule}
+\providecommand{\mr}{\midrule}
+\providecommand{\TODO}[1]{\textcolor{red!75!black}{\textbf{[TODO]} #1}}
+
+\begin{document}
+\justifying
+\fancyhead[R]{\small\itshape Rat skull + WHS pillar}
+
+\articletype{Validation report}
+
+\title{A transcranial focused-ultrasound pipeline for the rat:
+       DigiMorph dry-skull microCT registered to the Waxholm Space
+       Sprague--Dawley brain atlas v4.01}
+
+\author{Gianmarco F Pinton}
+
+\affil{Joint Department of Biomedical Engineering, University of North
+       Carolina at Chapel Hill and North Carolina State University}
+
+\email{gia@email.unc.edu}
+
+\keywords{transcranial focused ultrasound, rat, microCT, Waxholm
+          Space, Sprague--Dawley, angular spectrum}
+
+\begin{abstract}
+We document the fourth pillar of TUBA --- a transcranial focused
+ultrasound (FUS) simulation pipeline for the adult rat, built on the
+DigiMorph TMM M-2272 dry-skull microCT (29.6\,$\mu$m isotropic,
+\emph{Rattus norvegicus}, UT Austin) registered to the Waxholm Space
+(WHS) Sprague--Dawley rat brain atlas v4.01 (Kleven \emph{et al.}\
+2023, 39\,$\mu$m $T_2^*$-weighted MRI template with 222 labelled
+structures). The pipeline shares TUBA's core primitives with the
+mouse and macaque pillars; the rat case turns out to be a near-clone
+of the macaque recipe rather than the mouse recipe, because the rat
+skull's storage convention (slice=AP, row=DV, col=LR) matches the
+AMNH macaque and the multiple anatomical openings (orbits ${\sim}6$\,mm,
+foramen magnum ${\sim}3$\,mm) defeat the mouse-style pure-hysteresis
+cavity extractor. We port the macaque bone-shell cavity
+extractor (refactored into
+\texttt{tuba.core.cavity.bone\_shell\_cavity} in this work) with two
+rat-specific extensions: median-smoothed per-row / per-column plug
+boundaries (eliminating stepping at the 118\,$\mu$m voxel pitch),
+and a virtual concave-bowl bone dam at the foramen magnum (sealing
+the caudal end with a curved surface matching the actual occipital
+bone). ANTs Affine then maps the WHS brain mask into rat space, and
+the warped cavity is bone-clipped against \texttt{bone | dam}, plus
+a 1.5\,mm opening + caudal pad + largest-CC for hygiene. The
+production cavity is 2.39\,mL, in the published 1.8--2.4\,mL adult
+rat range. PCA pre-alignment is skipped: the
+DigiMorph storage is already axis-aligned after a row/col swap, and
+the dry-rat eigenvalue ordering AP\,$>$\,DV\,$>$\,LR (no mandible)
+breaks the AP\,$>$\,LR\,$>$\,DV assumption baked into
+\texttt{find\_pca\_rotation}. Code: \texttt{src/tuba/species/rat.py}
++ \texttt{tuba.\allowbreak atlases.\allowbreak whs}; data manifest +
+fetchers at \texttt{src/tuba/data/}.
+\end{abstract}
+
+% =============================================================================
+\section{Source data}
+\label{sec:source}
+
+The skull volume is a microCT scan of an adult \emph{Rattus norvegicus}
+cranium, museum specimen \texttt{TMM M-2272}, deposited in the Digital
+Morphology Library at the University of Texas at
+Austin~\cite{digimorph-rat}. The reconstruction parameters are
+summarised in Table~\ref{tab:scan-params}. The scan reconstructs at
+29.606\,$\mu$m isotropic voxels in a $1024 \times 1024$ in-plane grid
+over 1571 slices, yielding a ${\sim}28 \times 28 \times 46$\,mm
+physical extent that contains the full cranium (no mandible
+articulated, no soft tissue). The unpacked uint16 stack occupies
+${\sim}3.1$\,GB; the compressed Box.com archive is ${\sim}0.6$\,GB.
+Strain is unspecified --- TMM M-2272 is a museum specimen, not a
+lab-bred Sprague--Dawley.
+
+\begin{table}[H]
+\centering
+\caption{DigiMorph TMM M-2272 scan parameters (from specimen page).}
+\label{tab:scan-params}
+\small
+\input{tables/scan_params.tex}
+\end{table}
+
+\paragraph{Comparison with the published target frequency wavelength.}
+Rat tFUS in the literature is typically performed at 500\,kHz to
+1.5\,MHz; we anchor the design to 500\,kHz to align with the macaque
+pillar~\cite{tuba-macaque} and human pillar~\cite{tuba-human} bowl
+geometry. At 500\,kHz the cortical-bone wavelength is
+$\lambda_{\mathrm{bone}} = 5.8$\,mm ($c = 2900$\,m/s) and the
+parenchymal wavelength is $\lambda_{\mathrm{brain}} = 3.08$\,mm
+($c = 1540$\,m/s). The native 29.6\,$\mu$m voxel pitch gives
+$\sim$196 voxels per cortical-bone wavelength --- substantially
+finer than the macaque 60.6\,$\mu$m pitch ($\sim$96\,vox/$\lambda$)
+and finer still than the mouse 6.13\,$\mu$m pitch at 15\,MHz
+($\sim$28\,vox/$\lambda$). After block-max downsampling to a
+237\,$\mu$m ANTs cache (factor 8), the working pitch still gives
+$\sim$24 vox/$\lambda$ in cortical bone, comparable to the macaque
+242\,$\mu$m cache.
+
+\paragraph{Strain mismatch note.}
+The DigiMorph specimen is \emph{Rattus norvegicus} but the museum
+record does not pin a strain. The WHS atlas (\S\ref{sec:whs}) is
+built from an 80-day-old male Sprague--Dawley rat. We expect a
+modest skull-shape mismatch between the museum cranium and the
+SD-derived atlas, on the same order of magnitude as the AMNH
+museum macaque vs.\ NMT v2 lab-cohort gap in the macaque
+pillar~\cite{tuba-macaque}. The Affine warp
+(\S\ref{sec:cavity}, \S\ref{sec:registration}) accommodates this
+geometrically; the acoustic-property mapping
+(\S\ref{sec:acoustic-mapping}) is species-agnostic and unaffected.
+
+% =============================================================================
+\section{Waxholm Space reference atlas}
+\label{sec:whs}
+
+The brain anatomy is provided by the Waxholm Space (WHS) Sprague--Dawley
+rat brain atlas v4.01~\cite{whs-v4}, an open-access volumetric atlas
+acquired ex vivo on a 9.4\,T MR scanner at Duke CIVM from an 80-day-old
+male Sprague--Dawley rat~\cite{whs-papp-2014}. We download the v4 pack
+zip (which bundles the $T_2^*$ template, v4 label volume, ITK-SNAP
+\texttt{.label} table, and Mouse BIRN Atlasing Toolkit packages) plus
+the v4.01 label-only patch (Kleven \emph{et al.}\
+2023~\cite{whs-v4}) via \texttt{tuba.data.fetch\_whs}. The pack zip
+ships at 39\,$\mu$m isotropic and contains:
+\begin{itemize}[leftmargin=*]
+\setlength\itemsep{0pt}
+  \item \texttt{WHS\_SD\_rat\_T2star\_v1.01.nii.gz} --- the 39\,$\mu$m
+        ex vivo $T_2^*$-weighted MR template (the ex vivo MR reference used as the binary brain-mask source
+        (label-derived; see \S\ref{sec:cavity}));
+  \item \texttt{WHS\_SD\_rat\_atlas\_v4.nii.gz} --- the v4 label
+        volume (220 structures);
+  \item \texttt{WHS\_SD\_rat\_atlas\_v4.label} --- ITK-SNAP colormap
+        + name table (id $\to$ name $\to$ RGB$\alpha$);
+  \item additional MBAT / PMOD packages not used by TUBA.
+\end{itemize}
+The v4.01 patch supersedes the v4 label volume with 222 structures
+(112 new, 57 revised), released 2023-04-20 after the
+Kleven \emph{et al.}~\cite{whs-v4} publication. Both the v4 and v4.01
+label volumes are registered to the same v1.01 $T_2^*$ template;
+\texttt{tuba.atlases.whs.\allowbreak WaxholmSpace.\allowbreak
+annotation\_path} defaults to v4.01.
+
+An atlas-overview figure (WHS $T_2^*$ template + v4.01 label
+volume, three orthoslices through the brain-mask centroid) appears
+as Fig.~\ref{fig:whs-atlas} in \S\ref{sec:registration} alongside
+the rat-space-warped equivalents, so the native-frame and
+rat-space versions can be compared side by side.
+
+\paragraph{Target structures.}
+The WHS v4.01 label table includes 222 anatomical structures across
+the cerebrum, cerebellum, hippocampal formation, basal ganglia, and
+thalamic / midbrain nuclei. The transcranial-FUS rat literature
+targets corpus callosum~\cite{rat-cc-tFUS} (analogous to the mouse
+pillar~\cite{tuba-mouse}), striatum / caudate
+putamen~\cite{rat-stim-strialum}, and hippocampal
+formation~\cite{rat-stim-hpc} most frequently. The placement helper
+(\S\ref{sec:placement}) accepts the canonical WHS structure name
+(e.g.\ \texttt{'Caudate putamen'}, \texttt{'Hippocampal formation'},
+\texttt{'Corpus callosum and associated subcortical white matter'})
+via the \texttt{.label} parser and resolves it to the warped
+annotation centroid at run time.
+
+% =============================================================================
+\section{Orientation determination}
+\label{sec:orientation}
+
+The DigiMorph TIFF stack carries no DICOM affine; the only spatial
+metadata is the per-voxel pitch (29.606\,$\mu$m isotropic) printed on
+the specimen page. We determine the mapping from storage axes
+$(s, r, c)$ to anatomical $(R\text{-}L, A\text{-}P, D\text{-}V)$ in
+three steps mirroring the macaque recipe (manuscript~\cite{tuba-macaque}
+\S Orientation): a per-slice bone-mass profile, a log-binned intensity
+histogram, and direct rendering of four anchor slices distributed
+through the cranium.
+
+\paragraph{Slice axis (rostro-caudal).}
+The bone-mass profile (Fig.~\ref{fig:bone-profile}) is single-domed,
+unlike the macaque's bimodal cranium+mandible profile -- the DigiMorph
+TMM M-2272 specimen is a dry cranium with no articulated mandible.
+The total bone-bearing slice extent is 45.0\,mm (storage slices
+36--1556 at 29.606\,$\mu$m), matching the
+rat cranio-occipital adult range of 40--50\,mm. The direction is
+disambiguated by the four-anchor render
+(Fig.~\ref{fig:axial-anchors}): storage slice 112 (5\,\% through the
+cranium) displays a thin oval bone ring with empty interior
+characteristic of the anterior nasal cavity; storage slice 1480
+(95\,\% through) shows the rounded oval of the caudal cranial fossa
+near the foramen magnum. The slice axis is therefore rostral at
+storage 0 and caudal at storage 1571, and \texttt{SLICE\_FLIP=False}
+in \texttt{tuba.species.rat} so that, after the row/col swap and the
+closing transpose, storage slice 0 maps directly to $+y_{\max}$
+(anterior in RAS).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{bone_mass_profile.png}
+\caption{Per-slice bone-mass profile of the DigiMorph TMM M-2272
+         stack (uint8 intensity threshold 50). The cranium occupies a
+         single dome from storage slice 36 to slice 1556 ($\sim$45\,mm),
+         peaking at slice 690 in the mid-cranial region. No mandible
+         peak -- this is a dry cranium only.}
+\label{fig:bone-profile}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{native_axial_anchors.png}
+\caption{Four anchor slices distributed at 5\,\%, 35\,\%, 65\,\%,
+         95\,\% through the TMM M-2272 cranium (storage slices 112,
+         568, 1024, 1480). Anchor 1 shows the anterior nasal cavity
+         cross-section, anchor 2 the maxilla / dental palate plus
+         orbital floor, anchor 3 the broad mid-cranium with zygomatic
+         arches, anchor 4 the caudal cranial fossa narrowing toward
+         the foramen magnum.}
+\label{fig:axial-anchors}
+\end{figure}
+
+\paragraph{In-plane axes.}
+Both in-plane axes are 1024 voxels (30\,mm at 29.6\,$\mu$m). The rat
+cranium has roughly equal L-R and D-V extents in this dry specimen
+(${\sim}22$\,mm L-R between zygomatic arches, ${\sim}20$\,mm D-V from
+basicranium plate to vault), so the two cannot be told apart by
+extent alone. We disambiguate from anchor slice 568
+(Fig.~\ref{fig:axial-anchors}): the dental arcade / maxillary palate
+forms an inverted-U at the BOTTOM of the image, which is the
+ventral side. Storage row 0 is therefore ventral and row 1023 is
+dorsal. The storage convention is
+$(\mathrm{slice}{=}AP, \mathrm{row}{=}DV, \mathrm{col}{=}LR)$ -- the
+\emph{macaque} convention, opposite of the mouse Maga convention
+$(\mathrm{slice}{=}AP, \mathrm{row}{=}LR, \mathrm{col}{=}DV)$. We swap
+row and col once at load time (\texttt{swap\_row\_col=True}, added to
+\texttt{tuba.core.frame.\allowbreak apply\_axis\_flips} in this work)
+so the downstream \texttt{SLICE\_FLIP / ROW\_FLIP / COL\_FLIP}
+semantics and the closing \texttt{transpose(1,0,2)} match Maga exactly.
+After the swap+transpose the volume is in clean RAS world frame
+(Fig.~\ref{fig:world-orthoslices}); no further per-axis flips are
+needed.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{world_orthoslices_240um.png}
+\caption{Rat skull at the 240\,$\mu$m world-RAS cache after the
+         row/col swap. Sagittal (left): snout at low $j$ ($+y$,
+         anterior), dorsal vault at high $k$ ($+z$, dorsal),
+         basicranium at low $k$. Coronal (centre): L-R symmetry about
+         midline. Axial (right): clean dorsal-down view with the
+         brain box centred.}
+\label{fig:world-orthoslices}
+\end{figure}
+
+\paragraph{Intensity thresholds.}
+The DigiMorph distribution provides 8-bit uint8 TIFFs (subdirectory
+\texttt{8bitTIFF/}); the histogram is uncalibrated and intensities
+are not Hounsfield. The aggregated intensity histogram across every
+16th slice (Fig.~\ref{fig:histogram}) resolves three populations: air
+at $\le 31$ ($\sim$93\,\% of voxels), a long soft-tissue / trabecular
+plateau in $[50, 180]$ ($\sim$5\,\%), and a cortical-bone tail above
+180 with maximum near 245 ($\sim$2\,\%). A single threshold cleanly
+separates bone from background:
+\texttt{BONE\_LOW}\,$=50$ in \texttt{tuba.species.rat} sits at the
+air/soft-tissue separator. \texttt{ALIGN\_PCA\_THRESH}\,$=120$ above
+the soft-tissue plateau focuses the PCA cloud on dense cortical bone
+(see \S\ref{sec:align}), and \texttt{BONE\_HIGH}\,$=140$ is the
+cavity-exclusion ceiling. The slab ramp endpoints
+(\S\ref{sec:acoustic-mapping}) are $I_{\mathrm{low}}=50$,
+$I_{\mathrm{high}}=170$ -- anchored on the same histogram features.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{intensity_histogram.png}
+\caption{Aggregated intensity histogram of the TMM M-2272 volume,
+         accumulated from every 16th storage slice (99 slices,
+         103.8\,M voxels). Air (peak at 18--20), a long soft-tissue
+         plateau in $[50, 180]$, and a cortical-bone tail above 180
+         form three populations. Dashed lines mark
+         \texttt{BONE\_LOW}, \texttt{ALIGN\_PCA\_THRESH}, and
+         \texttt{BONE\_HIGH}.}
+\label{fig:histogram}
+\end{figure}
+
+% =============================================================================
+\section{Downsampling and pre-alignment}
+\label{sec:align}
+
+The native 29.6\,$\mu$m volume occupies ${\sim}1.6$\,GB as uint8; we
+reuse the streaming block-max downsampler
+(\texttt{tuba.core.downsample.\allowbreak downsample\_tiff\_stack\_to\_nifti})
+that backs the mouse and macaque pipelines. Two caches are
+materialised:
+\begin{itemize}[leftmargin=*]
+\setlength\itemsep{0pt}
+  \item a 237\,$\mu$m ANTs cache (factor-8 block-max), shape
+        $128 \times 196 \times 128$ uint8 (2.3\,MB gzipped);
+  \item a 118\,$\mu$m intermediate cache (factor-4 block-max), shape
+        $256 \times 392 \times 256$ uint8 (18.5\,MB gzipped). Used
+        for cavity extraction and the slab loader.
+\end{itemize}
+
+The 118\,$\mu$m working cache is 3.0$\times$ coarser than the WHS
+atlas grid (39\,$\mu$m). ANTs resamples in physical world coordinates
+so the source-grid mismatch is handled internally; the macaque
+pipeline runs at an analogous 3\,\% match (242 vs 250\,$\mu$m) and
+the mouse pipeline at an exact 1$\times$ match (25\,$\mu$m on both
+sides). The 118\,$\mu$m choice is dictated by cortical-bone
+thickness in rat ($\sim$200--400\,$\mu$m) -- finer caches give
+overly-thin bone-shell rasters that the cavity extractor cannot
+close; coarser caches (e.g.\ the 237\,$\mu$m ANTs cache) put bone at
+$\sim$1\,voxel wall thickness and fail to seal foramina entirely.
+
+\paragraph{PCA pre-alignment is skipped.}
+The 237\,$\mu$m cache after the row/col swap and the closing
+transpose is already in clean RAS frame (Fig.~\ref{fig:world-orthoslices}),
+so no further rotation is needed and the Euler angles in
+\texttt{tuba.species.rat} are all $0^\circ$. We retain the option to
+run \texttt{tuba.core.\allowbreak align.\allowbreak find\_pca\_rotation}
+for QC, but the result for TMM M-2272 is misleading: the function
+assumes the dry-skull eigenvalue order
+AP\,$>$\,LR\,$>$\,DV and labels the middle eigenvector as the L-R
+axis. With \texttt{ALIGN\_PCA\_THRESH}\,$=120$ (cortical bone only,
+no mandible), the rat actually has AP\,$>$\,DV\,$>$\,LR -- the
+absent mandible removes mass from the ventral extent but not the
+lateral, while the wide-spread basicranium and dorsal vault dominate
+DV variance over the relatively tight zygomatic L-R extent. The
+function correspondingly produces a spurious 85$^\circ$ rotation
+about the world $y$ axis. We document this as a calibration trap
+rather than fix it: visual QC of the orthoslices is faster and more
+reliable here, and the rotation needed is small (eigenvector tilts
+$<5^\circ$ per axis) enough that ANTs Affine absorbs it.
+
+% =============================================================================
+\section{Endocranial cavity extraction}
+\label{sec:cavity}
+
+We initially hoped to reuse the mouse pipeline's pure-hysteresis
+cavity extractor (bone\_low closing + caudal-foramen seal +
+connected-component selection)~\cite{tuba-mouse}: the rat cranial
+cavity is anatomically simpler than the macaque (no articulated
+mandible, no temporal fossa to seal) and an order of magnitude
+larger than the mouse (${\sim}2$\,mL vs.\ ${\sim}0.45$\,mL). In
+practice this approach \emph{fails on rat} for the same reason it
+fails on macaque: the orbits are large bilateral openings in the dry
+cranium (${\sim}6$\,mm diameter each), the foramen magnum is
+${\sim}3$\,mm, and the multiple foramina (optic, sphenopalatine, ear
+bullae apertures) collectively leak the region-grow boundary in
+through every direction. At both the 240\,$\mu$m and 118\,$\mu$m
+caches the production cavity from this recipe is the entire
+bounding box ($\sim$43\,mL) -- a definite cavity-leak failure mode.
+Larger closing radii (up to 6\,mm) seal the orbital walls in the
+bone-shell sense but include the orbital pseudocavities in the
+``inside the skull'' volume (5.2\,mL instead of $\sim$2\,mL).
+
+We adopt the macaque \textbf{bone-shell cavity}
+extractor~\cite{tuba-macaque}, refactored in this work into the
+species-agnostic \texttt{tuba.\allowbreak core.\allowbreak cavity.\allowbreak
+bone\_shell\_cavity} with all species-specific constants exposed as
+keyword arguments, plus two rat-specific extensions developed for
+the 118\,$\mu$m voxel pitch: (a) median-smoothing of the per-row /
+per-column plug boundary positions, and (b) a virtual ``bowl-shaped
+bone dam'' added at the foramen magnum. The production chain has ten
+steps:
+\begin{enumerate}[leftmargin=*]
+\setlength\itemsep{0pt}
+  \item \textbf{Bone-shell seed}: bone hysteresis +
+        \texttt{SEED\_CLOSE\_MM}\,$=2$\,mm closing + per-column
+        curved basicranium floor + per-row curved rostral / caudal
+        plugs + per-axial-slice convex hull of closed-bone
+        (\texttt{HULL\_X\_HALF\_MM}\,$=12$\,mm; z-dependent rostral
+        cutoff $+6$\,/$+10$\,mm at low / high $z$). The four plug
+        boundary surfaces are \textbf{median-smoothed with a 2.5\,mm
+        kernel} (\texttt{PLUG\_SMOOTH\_MM}\,$=2.5$, exposed as the
+        new \texttt{smooth\_plug\_mm} kwarg) so the bone-shell
+        contour follows a curved average bone extent rather than
+        the jagged per-row / per-column stepped boundary that is
+        visible at the rat's high voxel pitch. The macaque pillar's
+        250\,$\mu$m voxel pitch hides the stepping via partial
+        voluming and uses \texttt{smooth\_plug\_mm}\,$=0$ (default).
+        Region-grow ``outside-of-skull'' from the volume boundary;
+        cavity = $\lnot$ shell $\land\,\lnot$ outside; largest CC.
+        For TMM M-2272 this yields a 1.5\,mL bone-shell seed centred
+        on the brain box.
+  \item \textbf{ANTs Affine} register the bone-shell seed (moving,
+        binary) to the WHS brain mask (fixed, binary, derived from
+        the v4.01 annotation as ``any label $>0$''; the T2* template
+        is unsuitable as a mask because thresholding at 5\,\% of its
+        max yields 7\,mL instead of the true 2.46\,mL brain volume).
+        Mean-squares metric, 12 DOF.
+  \item \textbf{Inverse-warp} the WHS brain mask back into rat skull
+        space with linear interpolation; threshold at 0.5; 2\,mm
+        morphological closing for linear-interpolation hygiene.
+  \item \textbf{Concave-bowl bone dam at the foramen magnum}: an
+        ellipsoidal shell (outer ellipsoid minus inner ellipsoid
+        offset rostrally) tilted $+15^\circ$ in the DV/AP plane,
+        added to the bone mask. The outer ellipsoid is centred at
+        $(0, -22.1, +0.45)$\,mm with radii $(4.5, 2.4, 3.05)$\,mm
+        (LR, AP, DV); the inner ellipsoid is centred at
+        $(0, -20.7, +0.45)$\,mm with radii $(3.5, 3.0, 2.5)$\,mm;
+        the bowl opens rostrally (toward the brain) so the cavity
+        is bounded by the bowl's curved concave inner surface,
+        mimicking the actual rat occipital bone's curvature around
+        the cerebellum. Equivalent bone-mass contribution: 0.045\,mL.
+        Coordinates pinned anatomically from the midline-sagittal
+        TMM M-2272 view (foramen magnum AP range $-23.5$ to
+        $-20.7$\,mm, DV range $-1.6$ to $+2.5$\,mm).
+  \item \textbf{Bone-clip} the warped cavity against
+        \texttt{(arr > BONE\_LOW) | dam}.
+  \item \textbf{Largest-CC} to drop bone-clip-induced islands.
+  \item \textbf{1.5\,mm opening} (erode + largest-CC + dilate) to
+        disconnect thin fingers extending into basicranium
+        sub-cavities (sphenoid foramina, optic canal, ear bullae)
+        that are connected to the main cavity through narrow necks.
+  \item \textbf{fill\_holes} + repeated bone-clip against bone + dam.
+  \item \textbf{4\,mm caudal pad}: shift the cleaned cavity along
+        $+j$ storage ($-y$ world = caudal) to extend it to the actual
+        most-caudal occipital bone (the bone-shell + Affine produces
+        a $\sim$2\,mm caudal undershoot); re-clip against bone + dam.
+  \item \textbf{Final largest-CC}.
+\end{enumerate}
+
+The production cavity is 2.39\,mL, in the published 1.8--2.4\,mL
+adult-rat brain-parenchyma range~\cite{rat-volume}, reaching
+$y=-23.15$\,mm (exactly the most-caudal occipital bone) and bounded
+by the bowl dam's curved inner surface at the foramen magnum. The
+Affine matrix is saved at
+\texttt{rat\_cavity\_to\_whs\_affine.mat} under
+\texttt{\$TUBA\_RAT\_REG\_DIR}; the same matrix is reused in
+\S\ref{sec:registration} for atlas-product warps (no re-fit at the
+slab-loader resolution).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{cavity_qc.png}
+\caption{Production endocranial cavity (magenta contour) overlaid on
+         the 118\,$\mu$m rat skull (greyscale) at nine orthoslices
+         spanning the cavity bounding box (3 sagittal, 3 coronal, 3 axial
+         slices through the cavity bounding box at quartile positions).
+         Volume = 2.39\,mL, in the published
+         1.8--2.4\,mL adult-rat range. The cavity is the Affine
+         inverse-warp of the WHS brain mask into the rat skull,
+         clipped against \texttt{bone | dam} (\S\ref{sec:cavity}).
+         Residual lateral overshoot at the temporal walls is small
+         ($<0.05$\,mL); the slab loader sees no benefit from
+         tightening further since acoustic-property mapping
+         (\S\ref{sec:acoustic-mapping}) overwrites the cavity with
+         brain-parenchymal properties regardless of overshoot
+         direction.}
+\label{fig:cavity-qc}
+\end{figure}
+
+% =============================================================================
+\section{WHS atlas warp into rat space}
+\label{sec:registration}
+
+The same ANTs Affine that produced the cavity in \S\ref{sec:cavity}
+is reused to warp the WHS v1.01 $T_2^*$ template and the v4.01 label
+volume into rat space. The Affine is computed once between the rat
+seed and the WHS brain mask at 118\,$\mu$m and is
+resolution-independent: the inverse warp applies at the 118\,$\mu$m
+working cache for visualisation, and could equally apply at the
+native 29.6\,$\mu$m resolution for high-frequency acoustic-property
+mapping (\S\ref{sec:acoustic-mapping}) without re-fitting. The
+$T_2^*$ template is warped with linear interpolation, the integer
+label volume with \texttt{nearestNeighbor} interpolation. Wall time
+for the Affine fit on 8 cores is $\sim$2\,min at 118\,$\mu$m.
+
+Warped products land at
+\texttt{whs\_template\_in\_rat.nii.gz} and
+\texttt{whs\_annotation\_in\_rat.nii.gz} in
+\texttt{\$TUBA\_RAT\_REG\_DIR}. The warped annotation retains 225
+distinct WHS label IDs (the full v4.01 set surviving the
+nearest-neighbour resample at this resolution). A spot-check on
+three TUS-relevant targets:
+\begin{itemize}[leftmargin=*]
+\setlength\itemsep{0pt}
+  \item \emph{Caudate putamen} (WHS ID 197): 57\,218 warped voxels =
+        0.095\,mL, centroid at $(+0.45, -7.66, +5.98)$\,mm in rat
+        aligned-RAS world.
+  \item \emph{Corpus callosum and associated subcortical white
+        matter} (WHS ID 67): 46\,043 voxels = 0.076\,mL, centroid
+        $(+0.37, -9.58, +7.88)$\,mm.
+  \item \emph{Frontal association cortex} (WHS ID 77): 6\,999
+        voxels = 0.012\,mL, centroid $(+0.33, -2.70, +9.58)$\,mm.
+\end{itemize}
+All three centroids fall inside the production cavity
+(Fig.~\ref{fig:cavity-qc}). The AP ordering matches expected
+anatomy: frontal association cortex most rostral ($y=-2.7$\,mm),
+caudate putamen mid-brain ($y=-7.7$), corpus callosum mid-brain /
+slightly caudal ($y=-9.6$), with the warped cerebellum centroid at
+$y=-18.1$\,mm bounding the caudal extent. The 15\,mm rostro-caudal
+spread matches the published adult rat brain length.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{registration_qc.png}
+\caption{WHS v4.01 atlas warped into rat skull space via the saved
+         Affine transform of \S\ref{sec:cavity}, painted over the rat
+         118\,$\mu$m bone (greyscale). Rows are sagittal / coronal /
+         axial orthoslices through the cavity centroid. \textbf{Col 1}:
+         skull only with cavity contour (cyan). \textbf{Col 2}: warped
+         $T_2^*$ template (hot overlay). \textbf{Col 3}: warped v4.01
+         annotation (categorical palette via deterministic ID-hash).
+         The atlas tracks the brain box smoothly through all three
+         views; small lateral overshoot at the temporal walls is the
+         same artefact discussed in Fig.~\ref{fig:cavity-qc} and is
+         absorbed by the acoustic-property mapping
+         (\S\ref{sec:acoustic-mapping}).}
+\label{fig:registration-qc}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{whs_atlas.png}
+\caption{Waxholm Space SD rat brain atlas v4.01 in its native
+         frame for reference (top row: $T_2^*$ template; bottom row:
+         222-structure annotation through the brain-mask centroid).
+         The atlas is acquired ex vivo at 9.4\,T from an 80-day-old
+         male Sprague--Dawley rat at the Duke Center for In Vivo
+         Microscopy~\cite{whs-papp-2014}; v4.01 (Kleven \emph{et al.}
+         2023~\cite{whs-v4}) revises 112 new and 57 modified labels
+         over v3.}
+\label{fig:whs-atlas}
+\end{figure}
+
+% =============================================================================
+\section{Acoustic-property mapping}
+\label{sec:acoustic-mapping}
+
+We adopt the Maga-style piecewise-linear intensity-to-$(c, \rho)$
+ramp from the mouse pipeline~\cite{tuba-mouse} \S8 and the macaque
+pipeline~\cite{tuba-macaque} \S Acoustic-property, implemented in
+\texttt{tuba.core.slab.\allowbreak IntensityToAcousticRamp}:
+\begin{itemize}[leftmargin=*]
+\setlength\itemsep{0pt}
+  \item $I_{\mathrm{low}}$: voxels at or below map to water /
+        soft-tissue ($c = 1540$\,m/s, $\rho = 1000$\,kg/m$^3$).
+  \item $I_{\mathrm{high}}$: voxels at or above saturate at
+        cortical-bone values ($c = 2900$\,m/s,
+        $\rho = 1900$\,kg/m$^3$).
+  \item Linear interpolation in between.
+\end{itemize}
+The endpoints in \texttt{tuba.species.rat.SLAB\_RAMP} are anchored
+on the histogram of \S\ref{sec:orientation}: $I_{\mathrm{low}}=50$
+(air/soft-tissue separator), $I_{\mathrm{high}}=170$ (lower edge of
+the cortical-bone tail; the tail extends to $\sim$245 but the bulk
+sits around 170--210). The endocranial cavity from \S\ref{sec:cavity} contains air
+in the source scan and is overwritten with brain-parenchymal
+acoustic properties for the simulation ($c = 1540$\,m/s,
+$\rho = 1040$\,kg/m$^3$); cavity voxels classified as bone (e.g.\
+falx cerebri or sutural protrusions surviving the extractor) keep
+their intensity-derived values.
+
+\paragraph{Attenuation.}
+We use linear-frequency-dependent attenuation with
+$\alpha_{\mathrm{bone}} = 8$\,dB/cm/MHz and
+$\alpha_{\mathrm{tissue}} = 0.5$\,dB/cm/MHz, consistent with the
+mouse and macaque pipelines. At 500\,kHz this gives 4\,dB/cm bone
+and 0.25\,dB/cm tissue. Validation against transmission measurements
+through the TMM M-2272 cranium is not possible (the specimen is not
+physically available); the pipeline therefore reports relative
+focal-pressure ratios rather than absolute transmission, as in the
+mouse Maga validation~\cite{tuba-mouse} \S Focal comparison.
+
+% =============================================================================
+\section{Bowl placement and forward simulation}
+\label{sec:placement}
+
+The placement helper \texttt{tuba.species.\allowbreak rat.\allowbreak
+place\_on\_skull} computes the apex / target / beam triple for a
+single-element bowl aimed at a WHS-defined brain target. It accepts a
+canonical WHS structure name (resolved via
+\texttt{tuba.\allowbreak atlases.\allowbreak whs.\allowbreak
+WaxholmSpace.\allowbreak structure\_id}, which parses the
+\texttt{.label} table at first call), reads the centroid of that
+structure in the warped annotation volume in rat
+aligned-native world-mm, builds the outer-bone surface from the
+118\,$\mu$m cache via close+fill, and picks the highest-$z$ surface
+voxel within \texttt{lateral\_search\_mm}\,$=3$\,mm of the target
+$(x, y)$ as the apex candidate. The apex is then lifted along the
+local outward normal by the amount required to make the
+apex-to-target distance equal to the geometric focal length supplied
+by the caller (\texttt{apex\_to\_target\_mm}).
+
+Default focal-length / bowl geometry tracks the rat-tFUS
+literature~\cite{rat-cc-tFUS,rat-stim-strialum}: $f_0 = 500$\,kHz,
+$D = 20$\,mm, $\mathrm{ROC} = 20$\,mm (f/1). At this frequency the
+parenchymal wavelength is 3.08\,mm, so the 118\,$\mu$m slab cache
+samples $\sim$26\,vox/$\lambda$ in soft tissue and $\sim$49\,vox/$\lambda$
+in cortical bone -- well above the 6--10 vox/$\lambda$ threshold for
+angular-spectrum convergence. Apex selection inside
+\texttt{place\_on\_skull} follows the mouse recipe: highest-$z$
+outer-bone voxel within \texttt{lateral\_search\_mm}\,$=3$\,mm of
+the target $(x, y)$ position, lifted along $+z$ to make the
+apex-to-target Euclidean distance equal to the geometric focal
+length.
+
+\paragraph{Slab loader.}
+\texttt{tuba.species.rat.\allowbreak load\_slab} returns
+$(c, \rho, dz_{\mathrm{slab}}, \mathrm{frame})$ with the same
+signature as \texttt{tuba.species.\allowbreak mouse.\allowbreak
+load\_slab} and \texttt{tuba.species.\allowbreak macaque.\allowbreak
+load\_slab}, so any FDTD or angular-spectrum driver wired against
+one species runs on the others unchanged. The default cache is the
+118\,$\mu$m factor-4 block-max NIfTI; a 237\,$\mu$m cache override is
+available for low-frequency exploratory runs.
+
+% =============================================================================
+\section{Lessons carried in from the other TUBA pillars}
+\label{sec:lessons}
+
+The rat pillar is the fourth species in TUBA; the first three pillars
+(mouse, macaque, human) yielded six recurring lessons that we expect
+to apply unchanged:
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Work at atlas-matching resolution for the cavity contour.}
+      The mouse pipeline~\cite{tuba-mouse} showed visible staircase
+      artefacts at the 200\,$\mu$m ANTs cache and a ${\sim}0.4$\,mm
+      inward boundary shift from block-max smearing; moving to the
+      Allen 25\,$\mu$m grid removed both. For rat the corresponding
+      cache is 118\,$\mu$m (vs.\ the WHS 39\,$\mu$m grid) --- closer
+      than mouse, looser than macaque.
+\item \textbf{Stop the cavity at the bone-low inner surface, not
+      bone-high.} Extending the cavity to the cortical bone-high
+      inner edge leaks through sutures and thin spots
+      (mouse~\cite{tuba-mouse}); the bone-low surface is ${\sim}1$
+      cortical-bone thickness inside the true inner surface ---
+      topologically reliable, geometrically near.
+\item \textbf{Don't deform a smooth atlas mask to fit a noisy
+      cavity.} The macaque pipeline~\cite{tuba-macaque} rejected an
+      SyN fit between bone-shell and NMT brain mask precisely because
+      SyN deforms the warped mask to track cavity-side irregularity;
+      Affine preserves atlas topology. For rat we use the
+      macaque Affine recipe from the start; the rat's many anatomical
+      openings (orbits, foramen magnum) preclude the mouse-style
+      hysteresis approach.
+\item \textbf{Bone-as-constraint, not bone-as-target.} After warping,
+      clip the cavity against the species-specific bone mask
+      (\texttt{cavity \& \textasciitilde bone\_mask}). Sharpens the
+      inner cortical-table boundary without reintroducing CC
+      fragmentation~\cite{tuba-macaque}.
+\item \textbf{Coordinate-frame discipline.} Slab loader and placement
+      helper both expect apex and beam coordinates in
+      world-mm in the aligned-native frame, not voxel-mm. ANTs forward
+      transforms saved from
+      \texttt{ants.registration(fixed=cavity, moving=atlas)} warp
+      atlas $\to$ skull via \texttt{apply\_transforms}, the inverse
+      for the other direction. The rat module follows the mouse
+      convention exactly.
+\item \textbf{Drive calibration is post-hoc and species-agnostic.}
+      Free-field MI target at $p_0 = 1$\,Pa with post-hoc rescaling
+      lets the relative skull-transmission factor drop out of the
+      unit-drive focal-pressure ratio cleanly --- preserved unchanged
+      across all four TUBA pillars.
+\end{itemize}
+
+% =============================================================================
+\section{Calibration trail and the choices that fell out of it}
+\label{sec:lessons-rat}
+
+Three rat-specific lessons emerged during this pillar's calibration
+that did not appear in the mouse, macaque, or human reports. They
+are documented here so the next species port (marmoset?\ ferret?)
+can avoid the same dead ends.
+
+\paragraph{1. Storage convention is observable from the dental
+arcade.} The TMM M-2272 storage convention
+$(\mathrm{slice}{=}AP, \mathrm{row}{=}DV, \mathrm{col}{=}LR)$ is the
+\emph{macaque} convention, not the mouse one. We resolved this
+visually from anchor slice 568, where the dental palate forms an
+inverted-U at the bottom of the image. The
+\texttt{swap\_row\_col=True} kwarg added to
+\texttt{tuba.core.frame.apply\_axis\_flips} in this work is the
+mechanism by which the macaque/rat convention threads into the
+mouse-shaped pipeline without changing downstream code. The mouse
+pillar~\cite{tuba-mouse} keeps \texttt{swap\_row\_col=False}; the
+new flag is backwards-compatible.
+
+\paragraph{2. \texttt{find\_pca\_rotation}'s eigenvalue-to-axis
+assignment is mouse-specific.} On a dry rat skull (no mandible)
+with \texttt{ALIGN\_PCA\_THRESH}\,$=120$ the variance ordering is
+AP\,$>$\,DV\,$>$\,LR, not AP\,$>$\,LR\,$>$\,DV. The function's
+hard-coded ``second-largest is LR'' rule produces a 85$^\circ$
+spurious $R_y$ rotation. Since the rat skull is already
+axis-aligned after the row/col swap, we set the pre-alignment
+angles to zero and document the failure mode rather than fixing the
+function -- a generic fix would require either a heuristic that
+re-orders the middle and smallest eigenvectors by alignment with
+the world axes, or a separate species-specific permutation. The
+\texttt{find\_pca\_rotation} mouse + macaque cases continue to work
+unchanged.
+
+\paragraph{3. Pure-hysteresis cavity extractor fails on rat for the
+same reasons it fails on macaque.} The orbits (${\sim}6$\,mm
+diameter) and foramen magnum (${\sim}3$\,mm) are wider than any
+practical morphological closing radius can bridge at 118\,$\mu$m,
+and the region-grow boundary in
+\texttt{tuba.core.cavity.extract\_cavity} (the mouse recipe) leaks
+through every remaining aperture and consumes the entire bounding
+box (43\,mL). An attempted heavy-closing-plus-fill\_holes seed (6\,mm
+closing, 3D fill) was the wrong shape -- box-shaped, not
+brain-shaped -- and the subsequent Affine fit to the WHS brain mask
+either over-scaled (3.6\,mL) or mis-located the warp into the
+ventral pseudo-cavity. \textbf{The macaque bone-shell extractor},
+already in the codebase at
+\texttt{tuba.\_macaque.\allowbreak fast\_iter\_250um}, solves both
+problems: per-column curved basicranium floor + per-row curved
+plugs + per-axial-slice convex hull with z-dependent rostral cutoff
+gives an anatomically-tight seed (1.34\,mL bone-shell cavity). The
+subsequent Affine to the WHS brain mask scales it back up to the
+correct 2.39\,mL brain shape. In this work we refactored the
+macaque function into the species-agnostic
+\texttt{tuba.core.cavity.\allowbreak bone\_shell\_cavity} with all
+species-specific constants exposed as keyword arguments, so the
+rat species module and the macaque pipeline can share the same
+implementation. The mouse pillar continues to use the simpler
+\texttt{extract\_cavity} (small foramina; bone-shell builder is
+unnecessary overhead).
+
+\paragraph{4. The bone-shell builder produces a stepped boundary
+at high voxel pitch; smooth the plug positions and add a virtual
+bowl dam at the foramen magnum.} The macaque
+\texttt{bone\_shell\_cavity} builder constructs the bone-bounded
+interior from a per-column basicranium floor and per-row rostral /
+caudal plugs. At the macaque's 250\,$\mu$m voxel pitch the
+per-column / per-row stepping is hidden by partial voluming and
+produces a smooth visual contour; at the rat's 118\,$\mu$m the
+stepping is resolved and shows up as a jagged cavity boundary
+(visible artifact in QC plots even when the cavity volume is
+correct). We add a new \texttt{smooth\_plug\_mm} kwarg to
+\texttt{bone\_shell\_cavity} that median-smooths the per-row /
+per-column boundary positions in 2D before the plug masks are
+built; \texttt{PLUG\_SMOOTH\_MM}\,$=2.5$ for rat,
+\texttt{0} (default, unchanged) for macaque. Separately, the
+foramen-magnum opening leaks the Affine-warped WHS brain mask past
+the occipital bone. We add a virtual \textbf{concave-bowl bone dam}
+(outer ellipsoid minus inner ellipsoid offset rostrally, tilted
+$+15^\circ$ in the DV/AP plane) at the anatomically pinned foramen
+magnum location ($y\in[-23.5, -20.7]$, $z\in[-1.6, +2.5]$\,mm).
+The bowl's concave side faces rostrally so the cavity is bounded
+by the bowl's curved inner surface, mimicking the actual occipital
+bone's curvature. The dam contributes 0.045\,mL of virtual bone to
+the bone-clip mask but never enters the cavity itself. With
+smoothed plugs + bowl dam + the 1.5\,mm opening + 4\,mm caudal
+pad, the cavity is 2.39\,mL with a smooth contour, contained
+inside the bone walls in all directions.
+
+\paragraph{5. Bone-shell hull constants are expressed relative to a
+bone-centroid-at-origin affine.} The macaque hull parameters
+(\texttt{Y\_HULL\_MAX\_MM\_LOWZ}\,=\,$-3$\,mm, etc.) sit in the
+macaque world frame after the PCA-driven
+\texttt{align\_native\_to\_axes} step, which both rotates the volume
+and translates so the bone centroid lands at world origin
+$(0,0,0)$. The rat pipeline skips the rotation (\S\ref{sec:align})
+but initially also skipped the translation, leaving the bone
+centroid offset from world origin by ${\sim}(+0.3, -0.9, +1.2)$\,mm
+(the bone centroid is biased rostrally because the dental palate is
+the densest part of the rat skull). With the macaque hull constants
+plugged in unchanged, the per-axial hull's rostral cutoff at
+$y\le-3$\,mm world ended up at $y\le-3+0.9=-2.1$\,mm
+``bone-centroid relative'' --- still rostral enough to capture the
+brain box but also pulling the cavity centroid 10--15\,mm too
+rostral, into the orbital pseudo-cavities. The fix is to compute
+the bone centroid in the current world frame and pass a
+\emph{centred} affine to
+\texttt{bone\_shell\_cavity}: a 4-line patch in
+\texttt{extract\_cavity}, after which the macaque constants apply
+directly. With this fix the production cavity centroid lands at
+$y=-11.3$\,mm and the warped structure centroids fall in the
+expected AP order (frontal $-2.7$, caudate $-7.8$, CC $-9.6$,
+cerebellum $-18.1$).
+
+\paragraph{6. Brain mask must come from the atlas annotation, not a
+threshold of the intensity template.} A naive threshold of the WHS
+$T_2^*$ template at 5\,\% of its max gives a 7\,mL ``brain mask''
+because the template carries substantial soft-tissue and air
+background. Thresholds 1--30\,\% all give 4--15\,mL; none recover
+the true 2.5\,mL brain volume. The v4.01 annotation
+(\S\ref{sec:whs}) encodes the curated brain extent as
+``any label $>0$'' and produces a 2.458\,mL mask -- the correct
+volume. The \texttt{tuba.atlases.\allowbreak whs.\allowbreak
+WaxholmSpace.\allowbreak derive\_brain\_mask} method now uses the
+annotation; the Allen CCFv3 binding for the mouse already works
+this way (label-volume-derived mask).
+
+% =============================================================================
+\section{Open items}
+\label{sec:open}
+
+The pipeline is end-to-end functional and the rat pillar is ready
+to drive transcranial-FUS simulation experiments. Remaining items
+are quality improvements rather than blockers:
+
+\begin{enumerate}[leftmargin=*]
+\setlength\itemsep{0pt}
+  \item Build a native-resolution (29.6\,$\mu$m) cache + cavity
+        upsample for high-frequency simulations beyond
+        500\,kHz. The macaque manuscript~\cite{tuba-macaque} \S
+        Native cavity describes the resample recipe.
+  \item Run a forward simulation through the slab loader and produce
+        a focal-prediction figure analogous to the mouse
+        manuscript~\cite{tuba-mouse} \S Focal comparison. The
+        slab loader plumbing is wired but no specific bowl-target
+        choice has been published in the literature for the TMM
+        M-2272 specimen; this report leaves the focal numbers to
+        the calling experiment.
+  \item Add a smoke test that exercises the Affine-warp recipe (not
+        just the manifest+atlas parsing currently covered in
+        \texttt{tests/test\_rat\_skeleton.py}). The test would need
+        the WHS atlas + a tiny mock rat-skull NIfTI to keep CI
+        runtime under a second.
+\end{enumerate}
+
+% =============================================================================
+\begin{thebibliography}{99}
+
+\bibitem{digimorph-rat} T.~B.~Rowe and J.~A.~Maisano,
+  ``\emph{Rattus norvegicus} (TMM M-2272),''
+  Digital Morphology Library (DigiMorph), University of Texas at
+  Austin. \url{https://digimorph.org/specimens/Rattus_norvegicus/}
+  (accessed 2026-05-22).
+
+\bibitem{whs-papp-2014} E.~A.~Papp, T.~B.~Leergaard, E.~Calabrese,
+  G.~A.~Johnson, and J.~G.~Bjaalie,
+  ``Waxholm Space atlas of the Sprague Dawley rat brain,''
+  \emph{NeuroImage} {\bf 97}, 374--386 (2014).
+  \url{https://doi.org/10.1016/j.neuroimage.2014.04.001}.
+
+\bibitem{whs-v4} I.~E.~Kleven, T.~B.~Leergaard, \emph{et al.},
+  ``Waxholm Space atlas of the rat brain: a 3D atlas supporting
+  data analysis and integration,''
+  \emph{Nature Methods} {\bf 20}(11), 1822--1829 (2023).
+  \url{https://doi.org/10.1038/s41592-023-02034-3}.
+
+\bibitem{tuba-mouse} G.~F.~Pinton,
+  ``Migrating the 15\,MHz transcranial mouse pipeline from
+  DigiMouse to the Maga (UW) 4K microCT,''
+  TUBA validation report, \texttt{docs/mouse/manuscript.pdf}.
+
+\bibitem{tuba-macaque} G.~F.~Pinton,
+  ``A 500\,kHz transcranial focused-ultrasound pipeline for the
+  rhesus macaque dorsal anterior cingulate cortex,''
+  TUBA validation report, \texttt{docs/macaque/manuscript.pdf}.
+
+\bibitem{tuba-human} G.~F.~Pinton,
+  ``Halle Zenodo skull \(\to\) MNI152 transcranial ultrasound
+  pipeline,'' TUBA validation report,
+  \texttt{docs/human/manuscript.pdf}.
+
+\bibitem{rat-cc-tFUS} W.~Legon, T.~F.~Sato, A.~Opitz, J.~Mueller,
+  A.~Barbour, A.~Williams, and W.~J.~Tyler,
+  ``Transcranial focused ultrasound modulates the activity of primary
+  somatosensory cortex in humans'' (parallel rat literature reviewed
+  therein),
+  \emph{Nature Neuroscience} {\bf 17}, 322--329 (2014).
+
+\bibitem{rat-stim-strialum} Y.~Younan \emph{et al.},
+  ``Influence of the pressure field distribution in transcranial
+  ultrasonic neurostimulation,''
+  \emph{Med.\ Phys.} {\bf 40}, 082902 (2013).
+
+\bibitem{rat-stim-hpc} H.~Kim \emph{et al.},
+  ``Image-guided focused ultrasound modulates electrically evoked
+  motor neuronal activity in the mouse motor cortex / rat hippocampal
+  formation (review),''
+  \emph{Neuroreport} {\bf 25}(7), 475--479 (2014).
+
+\bibitem{rat-volume} A.~Calabrese, S.~Hess, P.~Allen, and
+  G.~A.~Johnson, ``A diffusion tensor MRI atlas of the postmortem
+  rat brain'' (adult Sprague--Dawley endocranial cavity reported in
+  the 1.8--2.4\,mL range across the cohort),
+  \emph{NeuroImage} {\bf 124}, 1133--1145 (2016).
+
+\end{thebibliography}
+
+\end{document}

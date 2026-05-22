@@ -162,6 +162,9 @@ def place_perpendicular_to_surface(target_world_mm,
                                    eeg_search_radius_mm=10.0,
                                    focal_length_mm=30.0,
                                    bowl_radius_mm=15.0,
+                                   aim_focus_at_target=True,
+                                   use_patch_normal=True,
+                                   rim_safety_mm=2.0,
                                    target_name=None,
                                    frame_name='aligned_native_RAS',
                                    verbose=True):
@@ -245,17 +248,93 @@ def place_perpendicular_to_surface(target_world_mm,
     in_front = parallel < 0
     score = np.where(in_front, perp_dist, np.inf)
     best = int(np.argmin(score))
-    scalp_contact = cand_pts[best]
-    outward_normal = cand_normals[best]
+    bone_anchor = cand_pts[best]
+    outward_normal = cand_normals[best].copy()
+
+    # ------------------------------------------------------------------
+    # Mean-normal over the contact patch: for wide bowls (R > a few mm)
+    # the local skull curves noticeably across the bowl footprint.
+    # Using a single vertex normal makes parts of the rim sink into bone
+    # at high-curvature sites.  Average the outward normals of all bone
+    # vertices that fall within radius ``bowl_radius_mm`` of the anchor
+    # in the plane perpendicular to the anchor's normal (i.e., inside
+    # the bowl footprint).  Iterate once on the updated normal so the
+    # patch membership stabilises.
+    # ------------------------------------------------------------------
+    if use_patch_normal:
+        n_local = outward_normal.copy()
+        for _ in range(2):
+            dvec = surf - bone_anchor
+            axial = dvec @ n_local
+            lat_vec = dvec - axial[:, None] * n_local[None]
+            lat_dist = np.linalg.norm(lat_vec, axis=1)
+            patch = ((lat_dist < bowl_radius_mm)
+                     & (np.abs(axial) < bowl_radius_mm))
+            if patch.sum() >= 5:
+                patch_n = normals[patch]
+                n_local = patch_n.mean(axis=0)
+                n_local = n_local / (np.linalg.norm(n_local) + 1e-12)
+        outward_normal = n_local
     beam_3d = -outward_normal
 
     h = float(focal_length_mm
               - np.sqrt(focal_length_mm**2 - bowl_radius_mm**2))
-    apex_world = scalp_contact - h * beam_3d
-    focus_world = apex_world + focal_length_mm * beam_3d
+
+    # ------------------------------------------------------------------
+    # Placement strategy.
+    #
+    # Geometry recap (beam = inward unit vector from outside of head):
+    #     apex = scalp_contact - apex_to_scalp * beam        (in air/water)
+    #     rim  = apex + h * beam                              (h mm below apex
+    #                                                          along beam,
+    #                                                          h = F - sqrt(F^2 - R^2))
+    #     focus= apex + F * beam                              (geometric focus)
+    #
+    # Two constraints:
+    #   (i)  rim must sit above the outer bone with at least
+    #        ``rim_safety_mm`` margin --> apex_to_scalp >= h + rim_safety_mm
+    #   (ii) the focus should land on the target when possible -->
+    #        F - apex_to_scalp == target_depth_along_beam, i.e.
+    #        apex_to_scalp = F - target_depth_along_beam
+    #
+    # When the target is shallow enough that constraint (ii) violates (i)
+    # (F - target_depth < h + safety) the focus undershoots the target;
+    # we set apex_to_scalp = h + rim_safety_mm and report
+    # focus != target (the F=R bowl geometry physically can't reach a
+    # shallow target without burying the rim).  When the target is deeper
+    # than F (constraint (ii) negative), apex sits h + safety above scalp
+    # and the focus is at apex + F*beam, well short of the target -- this
+    # is the "transducer is wrong for this target" case and again gets
+    # logged explicitly.
+    #
+    # ``aim_focus_at_target=False`` (legacy): apex sits exactly h mm
+    # outside the bone (rim ON bone, no water column) and focus =
+    # apex + F*beam regardless of target.  Kept for back-compat.
+    # ------------------------------------------------------------------
+    target_depth_along_beam = float(np.dot(target_lps - bone_anchor, beam_3d))
+    if aim_focus_at_target:
+        apex_to_scalp_mm_calc = max(h + float(rim_safety_mm),
+                                     focal_length_mm - target_depth_along_beam)
+        scalp_contact = bone_anchor
+        apex_world = scalp_contact - apex_to_scalp_mm_calc * beam_3d
+        focus_world = apex_world + focal_length_mm * beam_3d
+    else:
+        scalp_contact = bone_anchor
+        apex_world = scalp_contact - h * beam_3d
+        focus_world = apex_world + focal_length_mm * beam_3d
+
+    # Distance between geometric focus and target along the beam line
+    # (positive = focus beyond target along beam, negative = focus short
+    # of target).  Use the beam-projected distance so the placement
+    # quality check is independent of any small perp residual.
+    focus_to_target_along_beam_mm = float(np.dot(target_lps - focus_world,
+                                                    beam_3d))
+    focus_to_target_mm = float(np.linalg.norm(target_lps - focus_world))
+
     perp_residual_mm = float(perp_dist[best])
     scalp_to_target_mm = float(np.linalg.norm(target_lps - scalp_contact))
     apex_to_target_mm = float(np.linalg.norm(target_lps - apex_world))
+    apex_to_scalp_mm = float(np.linalg.norm(scalp_contact - apex_world))
 
     if verbose:
         print(f'    scalp contact world-mm = {scalp_contact.round(3)}')
@@ -305,5 +384,12 @@ def place_perpendicular_to_surface(target_world_mm,
                          if eeg_seed is not None else None),
         'eeg_to_placement_mm': (float(np.linalg.norm(eeg_seed - scalp_contact))
                                 if eeg_seed is not None else None),
+        'apex_to_scalp_mm': apex_to_scalp_mm,
+        'aim_focus_at_target': bool(aim_focus_at_target),
+        'patch_normal_used': bool(use_patch_normal),
+        'rim_safety_mm': float(rim_safety_mm),
+        'focus_to_target_mm': focus_to_target_mm,
+        'focus_to_target_along_beam_mm': focus_to_target_along_beam_mm,
+        'target_depth_along_beam_mm': target_depth_along_beam,
         'frame': frame_name,
     }

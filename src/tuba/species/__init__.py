@@ -20,4 +20,13 @@ Currently implemented:
   :mod:`tuba._macaque.isolate_cranium`) and Affine cavity
   extraction (no SyN). Regression test self-skips until
   ``TUBA_LEGACY_MACAQUE_REG`` is set.
+* :mod:`tuba.species.rat` -- DigiMorph TMM M-2272 dry-skull microCT
+  (29.6 um, UT Austin) + Waxholm Space SD rat atlas v4.01 (Kleven
+  et al. 2023, 39 um T2*, 222 structures). Production pillar -- uses
+  the macaque-style bone-shell cavity builder (refactored into
+  :func:`tuba.core.cavity.bone_shell_cavity`) with rat-scale
+  constants, median-smoothed per-row / per-column plug boundaries,
+  and a concave-bowl virtual bone dam at the foramen magnum, then
+  ANTs Affine to the WHS brain mask. See ``docs/rat/manuscript.pdf``
+  for the calibration trail and ``tests/test_rat_skeleton.py``.
 """

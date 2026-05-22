@@ -308,3 +308,68 @@ voxel_mm = 1.0
 approx_size_gb = 0.005
 n_specimens = 168
 notes = "Probabilistic variant also available; TUBA wires the deterministic one for label-based target lookup."
+
+# =============================================================================
+# Rat
+# =============================================================================
+
+[rat.skull]
+role = "skull"
+description = "Adult Rattus norvegicus dry skull microCT, TMM M-2272, 29.61 um iso"
+citation = "T. B. Rowe and J. A. Maisano. Rattus norvegicus (TMM M-2272). Digital Morphology Library (DigiMorph), University of Texas at Austin, https://digimorph.org/specimens/Rattus_norvegicus/."
+source_url = "https://digimorph.org/specimens/Rattus_norvegicus/"
+blob_urls = [
+    "https://utexas.box.com/shared/static/06k90e1ngabmqkq7ntvdexkcq2od2kpw.zip",
+]
+license = "open (DigiMorph terms; educational/research use)"
+auth_required = "click-through"
+fetcher_script = "src/tuba/data/fetch_rat.py"
+format = "TIFF stack"
+voxel_um = 29.61
+approx_size_gb = 0.6
+archive_name = "Rattus_norvegicus_TMM_M-2272.zip"
+archive_sha256 = "6f36b6263c2006193934a347fc647e53a1e5fc05203a7b03b4ba2ac29d6d9f86"
+n_specimens = 1
+notes = "TMM M-2272 cranium scanned at 29.606 um iso, 1571 slices of 1024x1024 uint8 (8-bit TIFFs in Rattus_norvegicus/8bitTIFF/), ~28x28x46 mm extent. Box.com static link sometimes serves the zip directly and sometimes flips to an interactive consent page; fetch_rat.py tries a direct GET first and falls back to the macaque-style print-and-wait pattern. Strain is unspecified (museum specimen, not lab-bred SD/Wistar); expect modest skull-shape mismatch against the SD-derived WHS atlas, on the same order as the AMNH macaque vs NMT v2 lab cohort gap."
+
+[rat.atlas_template]
+role = "atlas_template"
+description = "Waxholm Space SD rat T2*-weighted MRI template, 39 um isotropic"
+citation = "E. A. Papp, T. B. Leergaard, E. Calabrese, G. A. Johnson, J. G. Bjaalie. Waxholm Space atlas of the Sprague Dawley rat brain. NeuroImage 97:374-386, 2014."
+doi = "https://doi.org/10.1016/j.neuroimage.2014.04.001"
+source_url = "https://www.nitrc.org/projects/whs-sd-atlas"
+blob_urls = [
+    "https://www.nitrc.org/frs/download.php/12264/WHS_SD_rat_atlas_v4_pack.zip",
+]
+license = "CC BY 4.0"
+auth_required = "none"
+fetcher_script = "src/tuba/data/fetch_whs.py"
+format = "zip of NIfTI (T2* template + v4 labels + colormap + JSON)"
+voxel_um = 39.0
+approx_size_gb = 1.0
+archive_name = "WHS_SD_rat_atlas_v4_pack.zip"
+archive_sha256 = "358410a4ce38c2640be83744a7a4582b73b62f347ccc468259b14b539a105069"
+n_specimens = 1
+notes = "Pack zip bundles WHS_SD_rat_T2star_v1.01.nii.gz (39 um ex vivo T2* template, MRI/DTI scanned at Duke CIVM from an 80-day-old male Sprague-Dawley rat) alongside the v4 labels, colormap, and JSON metadata. fetch_whs.py also pulls the v4.01 label patch (see rat.atlas_annotation) into the same directory."
+
+[rat.atlas_annotation]
+role = "atlas_annotation"
+description = "Waxholm Space SD rat atlas v4.01 (222 structures)"
+citation = "I. E. Kleven, T. B. Leergaard, et al. Waxholm Space atlas of the rat brain: a 3D atlas supporting data analysis and integration. Nature Methods 20(11):1822-1829, 2023."
+doi = "https://doi.org/10.1038/s41592-023-02034-3"
+source_url = "https://www.nitrc.org/projects/whs-sd-atlas"
+blob_urls = [
+    "https://www.nitrc.org/frs/download.php/13398/WHS_SD_rat_atlas_v4.01.nii.gz",
+]
+license = "CC BY 4.0"
+auth_required = "none"
+fetcher_script = "src/tuba/data/fetch_whs.py"
+format = "NIfTI (uint16 label volume)"
+voxel_um = 39.0
+approx_size_gb = 0.005
+sha256 = "40d45344e9b5ef6b2c22ad9c834d69f34ed2a57b4e4300b6570813769c694cde"
+n_specimens = 1
+companion_files = [
+    { name = "WHS_SD_rat_atlas_v4.01.label", sha256 = "e30991cfce0ff03d1aba6bc10f2863fbe78087b7e380e7ecb508fcbd235839e7", size_mb = 0.02 },
+]
+notes = "v4.01 of the WHS Sprague Dawley label volume: 222 structures (112 new, 57 revised vs v3). Registered to WHS_SD_rat_T2star_v1.01.nii.gz which ships inside the v4 pack zip (see rat.atlas_template). Companion .label file is the ITK-SNAP colormap + name table."

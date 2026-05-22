@@ -44,21 +44,27 @@ Yeo-7 networks) — see [`docs/human/manuscript.pdf`](docs/human/manuscript.pdf)
 
 ## Install
 
+Recommended: [`uv`](https://docs.astral.sh/uv/) for fast, reproducible
+installs (pinned by `uv.lock`):
+
 ```sh
-pip install -e .
+uv sync                     # installs into a managed .venv
+uv sync --extra viz         # + nilearn + plotly
+uv sync --extra dev         # + pytest + ruff
 ```
 
-Optional extras:
+If you prefer pip:
 
 ```sh
-pip install -e ".[viz]"   # nilearn + plotly for richer figures
-pip install -e ".[dev]"   # pytest + ruff
+pip install -e .
+pip install -e ".[viz]"     # nilearn + plotly for richer figures
+pip install -e ".[dev]"     # pytest + ruff
 ```
 
 Python ≥ 3.10. Core deps: numpy, scipy, nibabel, pynrrd, tifffile,
 scikit-image, antspyx, matplotlib. `antspyx` is the heaviest install;
-on Linux a `pip install antspyx` wheel covers x86_64. For ARM /
-macOS use the upstream ANTsPy build instructions.
+on Linux an `antspyx` wheel covers x86_64. For ARM / macOS use the
+upstream ANTsPy build instructions.
 
 ## Data — `TUBA_*_REG_DIR` env vars
 
