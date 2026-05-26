@@ -1,31 +1,47 @@
 # TUBA — Transcranial Ultrasound Brain Atlas
 
 A unified pipeline for registering skull microCT volumes to brain atlases
-for transcranial focused-ultrasound (TUS) simulation, supporting mouse,
-macaque, and human species under a single library.
+for transcranial ultrasound simulation, supporting **mouse, macaque,
+human, and rat** species under a single library.
 
 ```python
-from tuba.species.mouse import place_on_skull, load_slab
-placement = place_on_skull(target_name='CC_left_body', apex_to_target_mm=20.0)
-c_map, rho_map, dz, frame = load_slab(
-    placement['xdc_center_lps'], placement['beam_dir_3d'],
-    slab_size_m=(12e-3, 12e-3, 15e-3), dx_target_m=29e-6,
-)
+from tuba.species import mouse, macaque, human, rat
+
+c, rho, dz, frame = rat.load_slab()  # or mouse / macaque / human
 ```
 
-The same call shape works for `tuba.species.macaque` and
-`tuba.species.human`. The library handles orientation, downsampling,
-cavity / outer-bone-surface extraction, ANTs SyN registration to the
-species-appropriate atlas, intensity-to-acoustic-property mapping, and
-beam-aligned slab sampling.
+The library handles orientation, downsampling, cavity / outer-bone-surface
+extraction, ANTs Affine/SyN registration to the species-appropriate atlas,
+intensity-to-acoustic-property mapping, and beam-aligned slab sampling.
 
 ## What TUBA gives you
 
-| Species | Atlas | Registration mode | Native pitch | Cached resolution |
-|---|---|---|---|---|
-| Mouse (Maga 4K dry skull) | Allen CCFv3 | cavity → brain-mask binary SyN | 6.127 µm | 25 µm |
-| Macaque (AMNH dry skull) | NMT v2 + CHARM/SARM/D99 | cavity → brain-mask binary SyN | 60.6 µm | 250 µm |
-| Human (Halle dry skull) | MNI152 ICBM 2009a | CT ↔ T1 intensity SyN | 0.125 mm | 1 mm |
+| Species | Skull source | Native pitch | Brain atlas | Cavity volume | Report |
+|---|---|---|---|---|---|
+| Mouse   | Maga 4K microCT (UW)         | 6.13 µm | Allen CCFv3 (25 µm, 668 regions)        | 0.45 mL  | [PDF](docs/mouse/manuscript.pdf)   |
+| Macaque | AMNH M-87264 (Copes 2016)    | 60.6 µm | NMT v2 + CHARM / SARM / D99             | 88 mL    | [PDF](docs/macaque/manuscript.pdf) |
+| Human   | Halle Zenodo (Kirchner 2022) | 125 µm  | MNI152 + 6 parcellations                | ~1300 mL | [PDF](docs/human/manuscript.pdf)   |
+| Rat     | DigiMorph TMM M-2272         | 29.6 µm | WHS SD v4.01 (Kleven 2023, 222 labels)  | 2.39 mL  | [PDF](docs/rat/manuscript.pdf)     |
+
+Two-page overview PDF: [`docs/overview/summary.pdf`](docs/overview/summary.pdf)
+
+### Atlas warped into skull space — one figure per pillar
+
+**Mouse — Allen CCFv3 in Maga skull**
+
+![Mouse: Allen CCFv3 in Maga (UW) 4K dry-skull microCT](docs/mouse/figures/registration_qc.png)
+
+**Macaque — NMT v2 in AMNH M-87264 skull**
+
+![Macaque: NMT v2 T1 template + CHARM cortical parcellation in AMNH M-87264](docs/macaque/figures/nmt_atlases_in_macaque.png)
+
+**Human — MNI152 + parcellations in Halle skull**
+
+![Human: Harvard-Oxford + Schaefer parcellations warped onto Halle Zenodo dry-skull CT](docs/human/figures/fig4_warped_atlases_on_halle.png)
+
+**Rat — WHS v4.01 in DigiMorph TMM M-2272 skull**
+
+![Rat: WHS v4.01 SD rat atlas warped onto DigiMorph TMM M-2272 skull via ANTs Affine](docs/rat/figures/registration_qc.png)
 
 Each species ships:
 - a `tuba.species.<x>` module with the species-specific numerics

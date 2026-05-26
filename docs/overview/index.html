@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TUBA — transcranial ultrasound brain atlas, four species, one pipeline</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --muted: #555;
+    --rule: #e4e4e8;
+    --accent: #1a4f8a;
+    --code-bg: #f5f5f7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--fg);
+    max-width: 1100px;
+    margin: 2.5rem auto;
+    padding: 0 1.25rem;
+    line-height: 1.55;
+  }
+  h1 { font-size: 1.7rem; margin: 0 0 0.25rem 0; }
+  h2 { font-size: 1.2rem; margin: 2.2rem 0 0.6rem 0; color: var(--accent); }
+  h3 { font-size: 1.05rem; margin: 1.8rem 0 0.4rem 0; }
+  .subtitle { color: var(--muted); font-size: 1.05rem; margin-top: 0; }
+  figure { margin: 1rem 0 1.8rem; }
+  figure img {
+    width: 100%; height: auto;
+    border: 1px solid var(--rule); border-radius: 6px;
+    background: white;
+  }
+  figcaption { font-size: 0.9rem; color: var(--muted); margin-top: 0.4rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.95rem; margin: 0.5rem 0 1rem; }
+  th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--rule); }
+  th { background: #fafafa; font-weight: 600; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92rem; }
+  pre { background: var(--code-bg); padding: 0.9rem 1rem; border-radius: 6px; overflow-x: auto; }
+  ol li, ul li { margin: 0.2rem 0; }
+  a { color: var(--accent); }
+  .footer { color: var(--muted); font-size: 0.88rem; margin-top: 2.5rem; border-top: 1px solid var(--rule); padding-top: 1rem; }
+  .badge { display: inline-block; background: var(--code-bg); border-radius: 4px; padding: 0.05rem 0.4rem; font-family: ui-monospace, monospace; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+
+<h1>TUBA</h1>
+<p class="subtitle">Transcranial ultrasound brain atlas — four species, one pipeline.</p>
+
+<p>
+TUBA is an open-source Python pipeline that registers a species-specific
+skull microCT to its canonical brain atlas, producing the
+<em>(geometry, intensity, atlas-label)</em> tuple needed for
+transcranial ultrasound simulation. Four species
+pillars are operational; they share the same core primitives
+(<code>tuba.core.{frame, downsample, align, cavity, registration,
+slab, placement}</code>) and differ only in the species-specific
+constants encoded in <code>tuba.species.&lt;name&gt;</code>.
+</p>
+
+<h2>Per-species snapshot</h2>
+
+<table>
+  <thead>
+    <tr><th>Pillar</th><th>Skull source</th><th>Native pitch</th><th>Brain atlas</th><th>Cavity volume</th><th>Report</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Mouse</td><td>Maga 4K microCT (UW)</td><td>6.13 µm</td><td>Allen CCFv3 (25 µm, 668 regions)</td><td>0.45 mL</td><td><a href="../mouse/manuscript.pdf">PDF</a></td></tr>
+    <tr><td>Macaque</td><td>AMNH M-87264 (Copes 2016)</td><td>60.6 µm</td><td>NMT v2 + CHARM / SARM / D99</td><td>88 mL</td><td><a href="../macaque/manuscript.pdf">PDF</a></td></tr>
+    <tr><td>Human</td><td>Halle Zenodo (Kirchner 2022)</td><td>125 µm</td><td>MNI152 + 6 parcellations</td><td>1300 mL</td><td><a href="../human/manuscript.pdf">PDF</a></td></tr>
+    <tr><td>Rat</td><td>DigiMorph TMM M-2272</td><td>29.6 µm</td><td>WHS SD v4.01 (Kleven 2023, 222 lbls.)</td><td>2.39 mL</td><td><a href="../rat/manuscript.pdf">PDF</a></td></tr>
+  </tbody>
+</table>
+
+<h3>Mouse — Allen CCFv3 in Maga skull</h3>
+<figure>
+  <img src="../mouse/figures/registration_qc.png" alt="Mouse: Allen CCFv3 atlas warped into Maga (UW) 4K dry-skull microCT, with extracted endocranial cavity contour">
+  <figcaption>Allen CCFv3 T2 template (warm overlay) + 668-region
+  annotation (categorical palette) warped onto the Maga 4K dry-skull
+  microCT, with the extracted endocranial cavity (cyan contour,
+  0.45&nbsp;mL). ANTs SyN registration. See
+  <a href="../mouse/manuscript.pdf">mouse validation report</a>.</figcaption>
+</figure>
+
+<h3>Macaque — NMT v2 in AMNH M-87264 skull</h3>
+<figure>
+  <img src="../macaque/figures/nmt_atlases_in_macaque.png" alt="Macaque: NMT v2 T1 template + CHARM cortical parcellation warped into AMNH M-87264 skull space">
+  <figcaption>NMT v2 T1 template + CHARM cortical parcellation
+  warped into AMNH M-87264 skull space via ANTs Affine (no SyN).
+  Endocranial cavity 88&nbsp;mL. See
+  <a href="../macaque/manuscript.pdf">macaque validation report</a>.</figcaption>
+</figure>
+
+<h3>Human — MNI152 + parcellations in Halle skull</h3>
+<figure>
+  <img src="../human/figures/fig4_warped_atlases_on_halle.png" alt="Human: Harvard-Oxford 117 + Schaefer 400 + Schaefer 1000 atlases warped onto the Halle Zenodo dry-skull CT">
+  <figcaption>Harvard-Oxford 117 + Schaefer 400 + Schaefer 1000
+  atlases warped onto the Halle Zenodo dry-skull CT (Kirchner 2022)
+  via ANTs SyN through MNI152. Endocranial cavity ~1300&nbsp;mL. See
+  <a href="../human/manuscript.pdf">human validation report</a>.</figcaption>
+</figure>
+
+<h3>Rat — WHS v4.01 in DigiMorph TMM M-2272 skull</h3>
+<figure>
+  <img src="../rat/figures/registration_qc.png" alt="Rat: WHS v4.01 SD rat atlas warped onto the DigiMorph TMM M-2272 skull via ANTs Affine">
+  <figcaption>WHS v4.01 SD rat atlas (T2* template + 222-structure
+  annotation) warped onto the DigiMorph TMM M-2272 skull via ANTs
+  Affine (cavity in cyan, 2.39&nbsp;mL). See
+  <a href="../rat/manuscript.pdf">rat validation report</a>.</figcaption>
+</figure>
+
+<h2>Pipeline at a glance</h2>
+
+<ol>
+  <li><strong>Fetch</strong> skull volume + atlas via the
+    <code>src/tuba/data/fetch_*.py</code> fetchers (provenance pinned
+    in <code>sources.toml</code> with SHA-256 checksums).</li>
+  <li><strong>Orient + downsample</strong> into RAS world frame
+    (<code>tuba.core.frame</code>, <code>tuba.core.downsample</code>).</li>
+  <li><strong>PCA pre-align</strong> when needed (mouse, macaque);
+    skipped for human and rat after the row/col swap.</li>
+  <li><strong>Extract cavity</strong>: mouse uses hysteresis-threshold;
+    macaque and rat use the bone-shell builder
+    (<code>tuba.core.cavity.bone_shell_cavity</code>); human uses
+    raycast outer-bone surface.</li>
+  <li><strong>Register</strong> the species atlas onto the cavity
+    (Affine for macaque, rat; SyN for mouse, human).</li>
+  <li><strong>Load slab</strong>: <code>tuba.species.&lt;name&gt;.load_slab()</code>
+    returns <code>(c, ρ, dz, frame)</code> for the FDTD /
+    angular-spectrum driver.</li>
+</ol>
+
+<h2>Code</h2>
+
+<pre><code>from tuba.species import mouse, macaque, human, rat
+
+c, rho, dz, frame = rat.load_slab()  # or mouse / macaque / human
+</code></pre>
+
+<h2>Reports + code</h2>
+
+<ul>
+  <li><a href="../mouse/manuscript.pdf">Mouse validation report</a> — DigiMouse → Maga (UW) migration, focal-prediction comparison</li>
+  <li><a href="../macaque/manuscript.pdf">Macaque validation report</a> — AMNH M-87264 + NMT v2, dorsal-ACC targeting</li>
+  <li><a href="../human/manuscript.pdf">Human validation report</a> — Halle Zenodo + MNI152, 6 parcellations warped to skull</li>
+  <li><a href="../rat/manuscript.pdf">Rat validation report</a> — DigiMorph TMM M-2272 + WHS v4.01, foramen-magnum dam calibration</li>
+  <li><a href="summary.pdf">Two-page overview PDF</a></li>
+  <li>Source: <a href="https://github.com/pinton-lab/tuba">github.com/pinton-lab/tuba</a></li>
+</ul>
+
+<h2>References</h2>
+
+<p style="font-size:0.9rem;color:var(--muted)">Each reference title links to Google Scholar.</p>
+
+<h3>Skull microCT sources</h3>
+<ol>
+  <li>M. Maga and collaborators, <a href="https://faculty.washington.edu/maga/SCRI_MicroCT/"><em>Sample microCT data from the SCRI Bone and Skeletal Mechanics Lab</em></a>, University of Washington.</li>
+  <li>L.E. Copes, L.M. Lucas, J.O. Thostenson, H.E. Hoekstra, and D.M. Boyer, <a href="https://scholar.google.com/scholar?q=10.1038/sdata.2016.1">&ldquo;A collection of non-human primate computed tomography scans housed in MorphoSource, a repository for 3D data&rdquo;</a>, <em>Sci. Data</em> <strong>3</strong>, 160001 (2016). doi:10.1038/sdata.2016.1</li>
+  <li>T. Kirchner, <a href="https://scholar.google.com/scholar?q=Kirchner+2022+micro-CT+human+skull+Zenodo+6108435">&ldquo;A micro-CT of a human skull&rdquo;</a>, Zenodo (2022). doi:10.5281/zenodo.6108435</li>
+  <li>T.B. Rowe and J.A. Maisano, <a href="https://digimorph.org/specimens/Rattus_norvegicus/"><em>Rattus norvegicus</em> (TMM M-2272)</a>, Digital Morphology Library, UT Austin.</li>
+</ol>
+
+<h3>Brain atlases</h3>
+<ol start="5">
+  <li>Q. Wang <em>et al.</em>, <a href="https://scholar.google.com/scholar?q=10.1016/j.cell.2020.04.007">&ldquo;The Allen Mouse Brain Common Coordinate Framework: A 3D Reference Atlas&rdquo;</a>, <em>Cell</em> <strong>181</strong>(4):936–953.e20 (2020). doi:10.1016/j.cell.2020.04.007</li>
+  <li>B. Jung, P.A. Taylor, J. Seidlitz, C. Sponheim, P. Perkins, L.G. Ungerleider, D. Glen, and A. Messinger, <a href="https://scholar.google.com/scholar?q=10.1016/j.neuroimage.2021.117997">&ldquo;A comprehensive macaque fMRI pipeline and hierarchical atlas&rdquo;</a> (NMT v2 + CHARM), <em>NeuroImage</em> <strong>235</strong>:117997 (2021). doi:10.1016/j.neuroimage.2021.117997</li>
+  <li>R. Hartig, D. Glen, B. Jung, N.K. Logothetis, G. Paxinos, E.A. Garza-Villarreal, A. Messinger, and C. Evrard, <a href="https://scholar.google.com/scholar?q=10.1016/j.neuroimage.2021.117996">&ldquo;The Subcortical Atlas of the Rhesus Macaque (SARM) for neuroimaging&rdquo;</a>, <em>NeuroImage</em> <strong>235</strong>:117996 (2021). doi:10.1016/j.neuroimage.2021.117996</li>
+  <li>K.S. Saleem and N. Logothetis, <a href="https://scholar.google.com/scholar?q=Saleem+Logothetis+Combined+MRI+Histology+Atlas+Rhesus+Monkey+Brain+Stereotaxic+Coordinates"><em>A Combined MRI and Histology Atlas of the Rhesus Monkey Brain in Stereotaxic Coordinates</em></a>, 2nd ed., Academic Press (2012).</li>
+  <li>V. Fonov, A.C. Evans, K. Botteron, C.R. Almli, R.C. McKinstry, D.L. Collins, and the Brain Development Cooperative Group, <a href="https://scholar.google.com/scholar?q=Fonov+2011+Unbiased+average+age-appropriate+atlases+pediatric+studies+NeuroImage">&ldquo;Unbiased average age-appropriate atlases for pediatric studies&rdquo;</a> (MNI152 ICBM 2009a), <em>NeuroImage</em> <strong>54</strong>(1):313–327 (2011).</li>
+  <li>R.S. Desikan, F. Ségonne, B. Fischl, B.T. Quinn <em>et al.</em>, <a href="https://scholar.google.com/scholar?q=10.1016/j.neuroimage.2006.01.021">&ldquo;An automated labeling system for subdividing the human cerebral cortex on MRI scans into gyral based regions of interest&rdquo;</a> (Harvard–Oxford basis), <em>NeuroImage</em> <strong>31</strong>(3):968–980 (2006). doi:10.1016/j.neuroimage.2006.01.021</li>
+  <li>A. Schaefer, R. Kong, E.M. Gordon, T.O. Laumann, X.-N. Zuo, A.J. Holmes, S.B. Eickhoff, and B.T.T. Yeo, <a href="https://scholar.google.com/scholar?q=Schaefer+2018+Local-global+parcellation+human+cerebral+cortex+intrinsic+functional+connectivity+MRI">&ldquo;Local-global parcellation of the human cerebral cortex from intrinsic functional connectivity MRI&rdquo;</a>, <em>Cerebral Cortex</em> <strong>28</strong>(9):3095–3114 (2018).</li>
+  <li>E.A. Papp, T.B. Leergaard, E. Calabrese, G.A. Johnson, and J.G. Bjaalie, <a href="https://scholar.google.com/scholar?q=10.1016/j.neuroimage.2014.04.001">&ldquo;Waxholm Space atlas of the Sprague Dawley rat brain&rdquo;</a>, <em>NeuroImage</em> <strong>97</strong>:374–386 (2014). doi:10.1016/j.neuroimage.2014.04.001</li>
+  <li>H. Kleven, I.E. Bjerke, F. Clascá, H.J. Groenewegen, J.G. Bjaalie, and T.B. Leergaard, <a href="https://scholar.google.com/scholar?q=10.1038/s41592-023-02034-3">&ldquo;Waxholm Space atlas of the rat brain: a 3D atlas supporting data analysis and integration&rdquo;</a>, <em>Nature Methods</em> <strong>20</strong>(11):1822–1829 (2023). doi:10.1038/s41592-023-02034-3</li>
+</ol>
+
+<p class="footer">
+  <span class="badge">TUBA</span> &nbsp;
+  Joint Department of Biomedical Engineering, UNC Chapel Hill / NC State.
+  Contact: <a href="mailto:gia@email.unc.edu">gia@email.unc.edu</a>.
+</p>
+
+</body>
+</html>
