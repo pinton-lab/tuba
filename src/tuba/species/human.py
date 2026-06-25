@@ -123,11 +123,12 @@ DEFAULT_FOCAL_LENGTH_MM = 30.0
 DEFAULT_BOWL_RADIUS_MM  = 15.0
 DEFAULT_EEG_SEARCH_RADIUS_MM = 10.0
 
-SYN_PREFIX = 'ants_syn'   # legacy prefix: ants_syn_forward.txt / ants_syn_inverse.txt
-# Legacy filenames don't match the default {prefix}_syn_{fwd,inv}.txt
-# template; pass these explicit paths to tuba.core.warp helpers.
-FWD_TXT_PATH = os.path.join(REG_DIR, 'ants_syn_forward.txt')
-INV_TXT_PATH = os.path.join(REG_DIR, 'ants_syn_inverse.txt')
+SYN_PREFIX = 'ants_syn'
+# Transform-list text files as written by tuba.core.warp.save_transforms, i.e. the
+# default {prefix}_syn_{fwd,inv}.txt template (NOT the old ants_syn_{forward,inverse}.txt,
+# which register_to_atlas never actually wrote -> mni_ras_to_halle_ras FileNotFoundError).
+FWD_TXT_PATH = os.path.join(REG_DIR, 'ants_syn_syn_fwd.txt')
+INV_TXT_PATH = os.path.join(REG_DIR, 'ants_syn_syn_inv.txt')
 
 
 # ---------------------------------------------------------------------------

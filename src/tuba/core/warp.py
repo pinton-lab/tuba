@@ -58,8 +58,9 @@ def save_transforms(fwd, inv, reg_dir, prefix):
         fwd_stable.append(dst)
     for src in inv:
         if src.endswith('.mat'):
-            inv_stable.append(paths['affine'])
+            inv_stable.append(paths['affine'])          # already copied in the fwd loop
         elif 'InverseWarp' in os.path.basename(src):
+            shutil.copyfile(src, paths['invwarp'])      # persist the inverse warp (was referenced but never copied)
             inv_stable.append(paths['invwarp'])
         else:
             inv_stable.append(paths['warp'])
