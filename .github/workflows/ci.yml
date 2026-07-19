@@ -31,10 +31,12 @@ jobs:
           # antspyx wheels are heavy and not needed for the import/manifest
           # smoke tests; the regression tests skip themselves when legacy
           # data is absent, which it always is on CI.
-          uv pip install --system numpy scipy nibabel pynrrd tifffile scikit-image matplotlib pytest
+          # --break-system-packages: the ubuntu-latest runner's system Python
+          # is PEP-668 externally-managed, which uv --system otherwise refuses.
+          uv pip install --system --break-system-packages numpy scipy nibabel pynrrd tifffile scikit-image matplotlib pytest
 
       - name: Install TUBA (editable, no extras)
-        run: uv pip install --system -e . --no-deps
+        run: uv pip install --system --break-system-packages -e . --no-deps
 
       - name: Import smoke test
         run: |
