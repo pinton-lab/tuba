@@ -23,18 +23,25 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Pin Python ${{ matrix.python-version }}
-        run: uv python pin ${{ matrix.python-version }}
+      - name: Create venv on Python ${{ matrix.python-version }}
+        # A uv-managed venv (not --system): the runner's system Python is
+        # PEP-668 externally-managed and not writable without root, and
+        # --system ignores the matrix version. uv fetches the requested
+        # CPython and owns the venv. Putting .venv/bin on PATH lets the
+        # later plain `python`/`pytest` steps resolve to it.
+        run: |
+          uv venv --python ${{ matrix.python-version }}
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies (lightweight; antspyx skipped on CI)
         run: |
           # antspyx wheels are heavy and not needed for the import/manifest
           # smoke tests; the regression tests skip themselves when legacy
           # data is absent, which it always is on CI.
-          uv pip install --system numpy scipy nibabel pynrrd tifffile scikit-image matplotlib pytest
+          uv pip install numpy scipy nibabel pynrrd tifffile scikit-image matplotlib pytest
 
       - name: Install TUBA (editable, no extras)
-        run: uv pip install --system -e . --no-deps
+        run: uv pip install -e . --no-deps
 
       - name: Import smoke test
         run: |

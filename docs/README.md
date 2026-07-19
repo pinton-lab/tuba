@@ -29,7 +29,7 @@ docs/
 │   ├── manuscript.pdf
 │   ├── compactarticle.cls -> ../compactarticle.cls
 │   ├── make_figures.py    regenerable: fig1–fig6 from registered NIfTIs
-│   ├── warp_atlases.py    warps the 6 PARCELLATIONS atlases to Halle space
+│   ├── warp_atlases.py    warps the 7 PARCELLATIONS atlases to Halle space
 │   └── figures/           fig1_halle_native, fig2_mni_template, …, fig6_extra_parcellations_on_halle
 └── rat/                   DigiMorph TMM M-2272 + Waxholm Space (Affine mode)
     ├── manuscript.tex     11-page narrative with 6 figures
@@ -72,7 +72,7 @@ pdflatex manuscript
 | §  | Mouse                       | Macaque                     | Human                  | Rat                                |
 |----|-----------------------------|-----------------------------|------------------------|------------------------------------|
 | 1  | Source data                 | Source data                 | Source data            | Source data                        |
-| 2  | Allen CCFv3 reference       | NMT v2 reference            | MNI152 + 6 parcellations | Waxholm Space v4.01 reference   |
+| 2  | Allen CCFv3 reference       | NMT v2 reference            | MNI152 + 7 parcellations | Waxholm Space v4.01 reference   |
 | 3  | Orientation determination   | Orientation                 | Orientation (LAS-vs-LPS) | Orientation (+ `swap_row_col`)   |
 | 4  | Downsampling                | Downsampling                | Downsampling           | Downsampling + skipped PCA         |
 | 5  | PCA pre-alignment           | PCA pre-alignment           | No pre-alignment       | (folded into §4 — none needed)     |
@@ -102,6 +102,41 @@ genuinely new design choice in the final lessons section.
 LaTeX numbers figures by document order, which differs from the
 file-name ordering — every cross-reference inside the PDF resolves
 correctly via `\ref{fig:halle_native}` etc.
+
+## MNI parcellation catalog
+
+`tuba.atlases.mni152.PARCELLATIONS` bundles the MNI-space atlases that
+`warp_atlases.py` brings into Halle space through the saved SyN
+transform. All live on (slightly different) MNI grids; ANTs resamples
+in physical world coordinates so the grid mismatch is handled
+internally.
+
+| Key | Scope | Labels | Space | License | Fetcher |
+|---|---|---|---|---|---|
+| `harvard_oxford_117` | cortex+subcortex | 117 | MNI152 1 mm | FSL (non-commercial) | nilearn |
+| `schaefer_400_7nets` | cortex | 400 | FSL-MNI152 1 mm | MIT (CBIG) | nilearn |
+| `schaefer_1000_7nets` | cortex | 1000 | FSL-MNI152 1 mm | MIT (CBIG) | nilearn |
+| `aal3` | cortex+subcortex+cerebellum | 166 | MNI152 1 mm | open (CNRS) | nilearn (TLS workaround) |
+| `pauli_2017` | subcortex | 16 | MNI152 0.7 mm | CC0 | nilearn |
+| `yeo_7nets` | networks | 7 | FreeSurfer-conformed MNI152 1 mm | open (FreeSurfer) | nilearn |
+| `diedrichsen_dcn` | cerebellum+nuclei | 34 | MNI152 1 mm (infratentorial FOV) | open (Diedrichsen lab; research use) | `tuba.data.fetch_cerebellar_atlases` |
+
+The **Diedrichsen** atlas (`atl-Anatom`; Diedrichsen 2009 lobules +
+Diedrichsen 2011 deep cerebellar nuclei) is the only probabilistic
+member: alongside the discrete dseg (the volume `PARCELLATIONS` warps)
+it ships a 4-D `probseg` of per-compartment probabilities. The six deep
+cerebellar nuclei are labels 29–34 (Left/Right Dentate, Interposed,
+Fastigial). `tuba.atlases.mni152.dentate_mask(side, threshold=0.5)`
+thresholds the probseg into a binary ROI + affine; `DiedrichsenDCN`
+adds `structure_id` / `all_structures` / `nucleus_mask` lookups in the
+whs/allen style. Only the MNI-space files are bound (SUIT and MNISym
+variants exist upstream) so the MNI→Halle warp applies unchanged.
+
+**Dentate centroid sanity** (probseg, threshold 0.5): left dentate
+≈ `[-14.6, -60.1, -34.3]` mm / 0.93 cm³, right ≈ `[15.6, -59.5, -34.6]`
+mm / 1.07 cm³ — ≈ 4–5 mm from the manuscript-cited dentate target
+`[±12, -57, -34..-36]` (a real, small offset from the Diedrichsen
+FNIRT-MNI normalization: ≈ 2.5 mm lateral + 3 mm anterior–posterior).
 
 ## Cavity-extraction lessons (carry over to a fourth species)
 
