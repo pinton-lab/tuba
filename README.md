@@ -179,8 +179,16 @@ locally present — set `TUBA_LEGACY_MOUSE_REG` and
 
 If TUBA is useful in your work, please cite the species manuscript
 that matches your application (see `docs/<species>/manuscript.pdf`)
-and the underlying atlas (Allen CCFv3 / NMT v2 / MNI152 ICBM 2009a).
+and the underlying atlas (Allen CCFv3 / NMT v2 / MNI152 ICBM 2009a). The full
+list of dataset citations is in [`NOTICE`](NOTICE).
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE). The MIT license covers TUBA's **source code only**.
+
+**Data & attribution:** TUBA bundles no scans or atlases — it fetches them, and
+each dataset carries its **own** license and citation terms (some **non‑commercial**).
+Full attributions are in [`NOTICE`](NOTICE); machine‑readable provenance (DOI,
+license, source URL per dataset) is in
+[`src/tuba/data/sources.toml`](src/tuba/data/sources.toml). You must observe each
+dataset's terms in addition to TUBA's MIT license.
