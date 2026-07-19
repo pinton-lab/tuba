@@ -4,8 +4,8 @@ Primate Scans collection; Copes et al. Sci Data 2016 doi:10.1038/sdata.2016.1).
 
 Source files
 ------------
-  /celerina/gfp/mfs/monkeyCT/mmulatta_mcz/
-    morphosource_media-id-000018084_download-c7068658/tiff_extracted/
+  Staged under ``$TUBA_MACAQUE_SOURCE_DIR`` (default
+  ``~/.cache/tuba/macaque/source/``; see fetch_macaque.py):
       AMNH 87264 Macaca mulatta m_0000.tif ... m_2147.tif
   2148 reconstructed slices, 1359 x 1548 uint16, 60.613 um isotropic
   (per the MorphoSource media manifest).
@@ -90,8 +90,7 @@ os.makedirs(REG_DIR, exist_ok=True)
 # ``~/.cache/tuba/macaque/source/`` (see fetch_macaque.py).
 SOURCE_DIR = os.environ.get(
     'TUBA_MACAQUE_SOURCE_DIR',
-    '/celerina/gfp/mfs/monkeyCT/mmulatta_mcz/'
-    'morphosource_media-id-000018084_download-c7068658/tiff_extracted')
+    os.path.expanduser('~/.cache/tuba/macaque/source'))
 TIFF_GLOB = os.environ.get(
     'TUBA_MACAQUE_TIFF_GLOB',
     os.path.join(SOURCE_DIR, 'AMNH 87264 Macaca mulatta m_*.tif'))
@@ -101,13 +100,6 @@ NMT_DEST = os.environ.get(
     'NMT_DEST',
     os.path.expanduser('~/.cache/tuba/macaque/atlas/nmt_v2'))
 NMT_DIR = os.path.join(NMT_DEST, 'NMT_v2.0_sym', 'NMT_v2.0_sym')
-# Drop back to legacy monkey_brain location if the cache hasn't been
-# populated yet, so the existing pipeline keeps working during port.
-if not os.path.isfile(os.path.join(NMT_DIR, 'NMT_v2.0_sym.nii.gz')):
-    _legacy_nmt = ('/celerina/gfp/mfs/monkey_brain/templates/nmt_v2/'
-                   'NMT_v2.0_sym/NMT_v2.0_sym')
-    if os.path.isfile(os.path.join(_legacy_nmt, 'NMT_v2.0_sym.nii.gz')):
-        NMT_DIR = _legacy_nmt
 
 # --- physical parameters ----------------------------------------------------
 NATIVE_VOXEL_MM = 0.060613            # MorphoSource manifest: 0.06061318 mm
