@@ -1,0 +1,126 @@
+tuba — Transcranial Ultrasound Brain Atlas
+Copyright 2026 Gianmarco Pinton / Pinton Lab
+
+Licensed under the MIT License (see LICENSE). The MIT license covers tuba's
+SOURCE CODE only.
+
+tuba registers skull microCT volumes to published brain atlases for
+transcranial-ultrasound simulation. It does NOT bundle or redistribute any of
+the datasets listed below. Each is fetched and staged locally by the user
+(see `src/tuba/data/sources.toml` and the `src/tuba/data/fetch_*.py` scripts),
+and each is governed by its OWN license and citation terms, which you must
+observe IN ADDITION TO tuba's MIT license. Some datasets are NON-COMMERCIAL or
+carry unstated terms — flagged below. Figures reproduced in `docs/*/manuscript.*`
+are derived from these same sources under the terms noted.
+
+`src/tuba/data/sources.toml` is the single source of truth for provenance
+(source URLs, DOIs, licenses, checksums, voxel sizes); this NOTICE summarizes it.
+
+================================================================================
+Registration & imaging software (pip dependencies — not redistributed here)
+================================================================================
+  ANTsPy (antspyx) — Apache-2.0. The SyN registration engine tuba drives.
+    Cite per the ANTsX project, e.g. Tustison et al., "The ANTsX ecosystem for
+    quantitative biological and medical imaging," Sci. Rep. 11:9068 (2021), and
+    Avants et al., NeuroImage 54(3):2033-2044 (2011). [confirm preferred cite]
+  nibabel (MIT), nilearn (BSD-3), pynrrd (MIT), scikit-image (BSD-3),
+  tifffile (BSD-3), NumPy / SciPy (BSD-3).
+
+================================================================================
+Skull microCT specimens
+================================================================================
+  Mouse — Adult dry skull, SkyScan 1272, 6.127 um iso.
+    M. Maga and collaborators, SCRI Bone and Skeletal Mechanics Lab,
+    University of Washington.  License: open (terms unstated).
+
+  Macaque — Adult Macaca mulatta dry skull, AMNH:Mammals:M-87264 (MorphoSource).
+    L. E. Copes, L. A. B. Lucas, J. O. Thostenson, H. E. Hoekstra, D. M. Boyer.
+    "A collection of non-human primate computed tomography scans housed in
+    MorphoSource." Sci. Data 3:160001 (2016).  doi:10.1038/sdata.2016.1
+    License: CC BY-NC (NON-COMMERCIAL).
+
+  Human ("Halle") — Ex vivo adult human skull microCT, released by a third party.
+    T. Kirchner. "A micro-CT of a human skull." Zenodo (2022).
+    doi:10.5281/zenodo.6108435   License: open (FAIR).
+    Body-donor skull, Institute of Anatomy, Martin-Luther-Universitat
+    Halle-Wittenberg.
+
+  Rat — Adult Rattus norvegicus dry skull, TMM M-2272, 29.6 um iso.
+    T. B. Rowe and J. A. Maisano. "Rattus norvegicus (TMM M-2272)," Digital
+    Morphology Library (DigiMorph), University of Texas at Austin.
+    License: DigiMorph terms (educational/research use).
+
+================================================================================
+Brain atlases, templates & parcellations
+================================================================================
+
+Mouse
+  Allen Mouse Brain CCFv3 — 25 um average template + structure annotation.
+    Q. Wang, S.-L. Ding, Y. Li, et al. "The Allen Mouse Brain Common Coordinate
+    Framework: A 3D Reference Atlas." Cell 181(4):936-953.e20 (2020).
+    doi:10.1016/j.cell.2020.04.007   License: open (Allen Brain Atlas terms).
+
+Macaque — NMT v2.0 symmetric template + parcellations (NIMH/AFNI public)
+  NMT v2.0 template & CHARM cortical hierarchy —
+    B. Jung, P. A. Taylor, J. S. Seidlitz, et al. "A comprehensive macaque fMRI
+    pipeline and hierarchical atlas." NeuroImage 235:117997 (2021).
+    doi:10.1016/j.neuroimage.2021.117997
+  SARM subcortical hierarchy —
+    R. Hartig, D. Glen, B. Jung, N. K. Logothetis, G. Paxinos, et al. "The
+    Subcortical Atlas of the Rhesus Macaque (SARM) for neuroimaging."
+    NeuroImage 235:117996 (2021).  doi:10.1016/j.neuroimage.2021.117996
+  D99 v2 atlas —
+    K. S. Saleem, N. Logothetis. "A Combined MRI and Histology Atlas of the
+    Rhesus Monkey Brain in Stereotaxic Coordinates," 2nd ed., Academic Press
+    (2012); NMT-aligned release in Jung et al. (2021).
+
+Human — MNI152 space
+  MNI152 ICBM 2009a symmetric T1 template —
+    V. Fonov, A. C. Evans, K. Botteron, et al. "Unbiased average age-appropriate
+    atlases for pediatric studies." NeuroImage 54(1):313-327 (2011).
+    doi:10.1016/j.neuroimage.2010.07.033   License: open (MNI/McGill).
+  Harvard-Oxford cortical + subcortical structural atlas (FSL) —
+    Ships with FSL.  License: FSL license (NON-COMMERCIAL, open).
+  Schaefer 2018 cortical parcellation (400 parcels, 7 networks) —
+    A. Schaefer, R. Kong, E. M. Gordon, et al. "Local-global parcellation of the
+    human cerebral cortex from intrinsic functional connectivity MRI."
+    Cerebral Cortex 28(9):3095-3114 (2018).  doi:10.1093/cercor/bhx179
+    License: MIT (CBIG).
+  AAL (Automated Anatomical Labeling) —
+    N. Tzourio-Mazoyer, B. Landeau, D. Papathanassiou, et al. NeuroImage
+    15(1):273-289 (2002).  doi:10.1006/nimg.2001.0978   License: open (CNRS).
+  Yeo 2011 7-network resting-state parcellation —
+    B. T. T. Yeo, F. M. Krienen, J. Sepulcre, et al. "The organization of the
+    human cerebral cortex estimated by intrinsic functional connectivity."
+    J. Neurophysiol. 106(3):1125-1165 (2011).  doi:10.1152/jn.00338.2011
+    License: open (FreeSurfer).
+  Pauli 2018 deterministic subcortical atlas —
+    W. M. Pauli, A. N. Nili, J. M. Tyszka. "A high-resolution probabilistic in
+    vivo atlas of human subcortical brain nuclei." Sci. Data 5:180063 (2018).
+    doi:10.1038/sdata.2018.63   License: CC0.
+
+Cerebellum — cross-species, in MNI152 space
+  Diedrichsen probabilistic cerebellar atlas (lobules + deep cerebellar nuclei) —
+    J. Diedrichsen, S. Maderwald, M. Kuper, M. Thurling, K. Rabe, E. R.
+    Gizewski, M. Ladd, D. Timmann. "Imaging the deep cerebellar nuclei: A
+    probabilistic atlas and normalization procedure." NeuroImage 54(3):1786-1794
+    (2011).  doi:10.1016/j.neuroimage.2011.02.009
+    Lobules: J. Diedrichsen, J. H. Balsters, J. Flavell, E. Cussans, N. Ramnani.
+    "A probabilistic atlas of the human cerebellum." NeuroImage 46(1):39-46
+    (2009).   License: open (terms unstated).
+
+Rat — Waxholm Space, Sprague Dawley
+  WHS SD rat T2*-weighted template (39 um) —
+    E. A. Papp, T. B. Leergaard, E. Calabrese, G. A. Johnson, J. G. Bjaalie.
+    "Waxholm Space atlas of the Sprague Dawley rat brain." NeuroImage
+    97:374-386 (2014).  doi:10.1016/j.neuroimage.2014.04.001   License: CC BY 4.0.
+  WHS SD rat atlas v4.01 (222 structures) —
+    I. E. Kleven, T. B. Leergaard, et al. "Waxholm Space atlas of the rat brain:
+    a 3D atlas supporting data analysis and integration." Nature Methods
+    20(11):1822-1829 (2023).  doi:10.1038/s41592-023-02034-3   License: CC BY 4.0.
+
+================================================================================
+The large simulation/data files (and the volumes underlying the docs figures)
+are NOT committed to this repository. See src/tuba/data/sources.toml and the
+README "Data" section for how to stage each dataset locally.
+================================================================================

@@ -53,3 +53,8 @@ docs/**/*.synctex.gz
 # code falls back to if env vars are unset.
 .cache/
 data/cache/
+# Root-anchored staging dirs for raw scans (never committed; see
+# src/tuba/data/sources.toml). Anchored with a leading slash so they only
+# match the repo-root dirs, NOT the tracked src/tuba/data/ package.
+/data/
+/skull_sources/
