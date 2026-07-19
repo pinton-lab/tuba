@@ -108,7 +108,8 @@ def test_label_table_parser_and_aliases():
         assert atlas.structure_id('Left_Dentate') == 29   # .tsv spelling
         assert atlas.structure_id('Dentate_L') == 29       # friendly alias
         assert atlas.structure_id('Dentate_R') == 30
-        assert atlas.structure_id('left_dentate') == 29    # case-insensitive
+        assert atlas.structure_id('left_dentate') == 29    # .tsv, any case
+        assert atlas.structure_id('dentate_l') == 29       # alias, any case
         with pytest.raises(KeyError, match='Bogus_Nucleus'):
             atlas.structure_id('Bogus_Nucleus')
 

@@ -44,11 +44,13 @@ DEST = os.environ.get(
 )
 os.makedirs(DEST, exist_ok=True)
 
-# Pinned to the master branch of the DiedrichsenLab/cerebellar_atlases
-# repo (current commit 1b62fdc, 2025-10-26). Switch to a commit SHA in
-# place of ``master`` if a reproducible pin is needed.
+# Pinned to an immutable commit of the DiedrichsenLab/cerebellar_atlases
+# repo (1b62fdc, 2025-10-26) so re-fetches are reproducible and cannot
+# drift out from under the centroid/volume tolerances asserted in
+# tests/test_diedrichsen_dcn.py. Bump this SHA to adopt an atlas update.
 _RAW = ('https://raw.githubusercontent.com/DiedrichsenLab/'
-        'cerebellar_atlases/master/Diedrichsen_2009')
+        'cerebellar_atlases/1b62fdc0954d34ed768ec36e81ce6a007dbe9e3c/'
+        'Diedrichsen_2009')
 
 URLS = {
     'atl-Anatom_space-MNI_dseg.nii':
@@ -84,7 +86,7 @@ def main():
     print(f'Staging Diedrichsen cerebellar atlas (MNI dseg + probseg) '
           f'into {DEST}')
     for name, url in URLS.items():
-        _fetch(name, URLS[name])
+        _fetch(name, url)
     print('\nAll staged.')
     return 0
 

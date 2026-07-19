@@ -333,6 +333,13 @@ _DIEDRICHSEN_DCN_ALIASES = {
     for abbr, word in (('L', 'Left'), ('R', 'Right'))
 }
 
+# Case-insensitive view of the alias map so ``structure_id('dentate_l')``
+# resolves the same as ``structure_id('Dentate_L')`` (the .tsv spellings
+# already get a case-insensitive fallback in structure_id).
+_DIEDRICHSEN_DCN_ALIASES_LOWER = {
+    k.lower(): v for k, v in _DIEDRICHSEN_DCN_ALIASES.items()
+}
+
 
 def _norm_side(side):
     """Normalise a side argument to ``'L'`` or ``'R'``."""
@@ -436,7 +443,8 @@ class DiedrichsenDCN:
         hardcoded ID.
         """
         table = self._parse_label_table()
-        canonical = _DIEDRICHSEN_DCN_ALIASES.get(name, name)
+        canonical = _DIEDRICHSEN_DCN_ALIASES.get(
+            name, _DIEDRICHSEN_DCN_ALIASES_LOWER.get(name.lower(), name))
         if canonical in table:
             return table[canonical]
         lower = {k.lower(): v for k, v in table.items()}
