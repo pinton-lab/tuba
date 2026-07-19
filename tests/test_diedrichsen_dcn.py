@@ -125,9 +125,16 @@ def test_diedrichsen_manifest_entry():
     assert s.voxel_mm == 1.0
     assert '2011' in s.citation and 'deep cerebellar nuclei' in s.citation
     assert s.auth_required == 'none'
-    # Omitted until pinned; tolerate a real 64-hex hash so pinning later
-    # does not break this test.
-    assert s.sha256 is None or len(s.sha256) == 64
+    # Every fetched file must carry a pinned 64-hex sha256: the primary dseg
+    # on `sha256`, the probseg/tsv/lut in companion_files. Tie the hashed set
+    # to the blob_urls basenames so a future download can't slip in unhashed.
+    import re
+    hex64 = re.compile(r'^[0-9a-f]{64}$')
+    assert s.sha256 and hex64.match(s.sha256)
+    comp = {c['name']: c['sha256'] for c in s.companion_files}
+    assert comp and all(hex64.match(h) for h in comp.values())
+    url_names = {u.rsplit('/', 1)[-1] for u in s.blob_urls}
+    assert set(comp) | {'atl-Anatom_space-MNI_dseg.nii'} == url_names
 
 
 def test_fetcher_exists_and_importable():
