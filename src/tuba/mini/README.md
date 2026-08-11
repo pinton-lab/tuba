@@ -47,6 +47,25 @@ paths = itrusst.build(parcellation="harvard_oxford_117")   # one-time (antspyx)
 # paths['bone'], paths['cavity'], paths['brain_in_skull'], paths['parc_in_skull']
 ```
 
+## Placement + acoustic slab
+
+Beyond atlasing, the binding wires TUBA's `core.placement` + `core.slab`
+so the ITRUSST skull becomes a full mini transcranial demo — place a
+focused bowl perpendicular to the outer skull aimed at an MNI target
+(optionally seeded at an EEG 10-20 site), then extract the beam-aligned
+`(c, ρ)` acoustic slab the solver ingests:
+
+```python
+pl = itrusst.place(target_name="M1_left", scalp_site="C3")   # ITRUSST 500 kHz bowl
+#   pl['xdc_center_lps'] (apex), pl['beam_dir_3d'] (inward), pl['focus_lps'],
+#   pl['perp_residual_mm'], pl['focus_to_target_mm']
+c, rho, dz, frame = itrusst.load_slab(pl)   # homogeneous bone (2800) in water (1500)
+```
+
+The bowl defaults to the benchmark geometry (F = 64 mm, R = 32 mm); the
+medium is the benchmark's homogeneous cortical bone in water (no cavity
+infill, unlike the dry-skull species pipelines).
+
 ## Licensing note
 
 The ITRUSST STLs are permissively hosted; the demo warps the **MNI152

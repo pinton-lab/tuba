@@ -89,6 +89,35 @@ def test_point_marker_centroid_roundtrips(tmp_path):
     assert np.allclose(world, coord, atol=1.0)
 
 
+def test_place_perpendicular_on_hemisphere():
+    """place() on a synthetic upper-hemisphere skull: the apex sits above
+    the dome, the beam points inward (downward) at a sub-apex target, and
+    the perpendicular residual is ~0. Exercises the tuba.core.placement
+    wiring without fetching the STL."""
+    from tuba.mini import itrusst
+
+    # upper hemisphere, radius 70 mm, outward (radial) normals
+    u = np.linspace(0, 2 * np.pi, 120)
+    v = np.linspace(0.02, np.pi / 2, 60)
+    uu, vv = np.meshgrid(u, v)
+    R = 70.0
+    verts = np.stack([
+        R * np.cos(uu) * np.sin(vv),
+        R * np.sin(uu) * np.sin(vv),
+        R * np.cos(vv)], axis=-1).reshape(-1, 3)
+    normals = verts / np.linalg.norm(verts, axis=1, keepdims=True)
+
+    pl = itrusst.place(target_ras_mm=(0.0, 0.0, 20.0),
+                       surface=(verts, normals), focal_length_mm=64.0,
+                       bowl_radius_mm=32.0, verbose=False)
+
+    assert pl['beam_dir_3d'][2] < -0.9          # beam points inward/down
+    assert pl['perp_residual_mm'] < 2.0         # target under the dome apex
+    assert pl['scalp_contact_lps'][2] > 60.0    # contact near the dome top
+    # apex sits outside the bone, above the scalp contact
+    assert pl['xdc_center_lps'][2] > pl['scalp_contact_lps'][2]
+
+
 def test_containment_metrics():
     """Perfect containment -> frac 1.0; identical masks -> dice 1.0."""
     import nibabel as nib

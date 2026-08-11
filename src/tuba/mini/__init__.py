@@ -26,8 +26,15 @@ Submodules
 fetch     stage the ITRUSST STLs + MNI152 template (direct, no auth)
 skull     rasterize the STLs into aligned bone + cavity voxel masks
 register  cavity <-> MNI SyN and warp MNI volumes onto the skull grid
-itrusst   the binding tying it together (paths, build, targets)
-demo      end-to-end runnable + QC overlay figure
+itrusst   the binding: paths, build, targets, bowl placement, acoustic slab
+demo      end-to-end runnable + QC overlay + placement/slab figures
+
+Beyond atlasing, the binding wires TUBA's placement + slab core so the
+ITRUSST skull becomes a full mini transcranial demo::
+
+    from tuba.mini import itrusst
+    pl = itrusst.place(target_name='M1_left', scalp_site='C3')
+    c, rho, dz, frame = itrusst.load_slab(pl)   # beam-aligned (c, rho) slab
 """
 
 __all__ = ['fetch', 'skull', 'register', 'itrusst', 'demo']
