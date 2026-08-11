@@ -58,8 +58,17 @@ def save_transforms(fwd, inv, reg_dir, prefix):
         fwd_stable.append(dst)
     for src in inv:
         if src.endswith('.mat'):
+            # Same GenericAffine file as the fwd list (already copied above);
+            # applied with whichtoinvert in warp_atlas_into_subject.
             inv_stable.append(paths['affine'])
         elif 'InverseWarp' in os.path.basename(src):
+            # The dense inverse displacement field only appears in the inv
+            # list (never the fwd list), so it must be copied here -- a dense
+            # warp cannot be reconstructed from the forward field. Without
+            # this copy the cavity_binary consumer path
+            # (warp_atlas_into_subject -> load_inv_txt) references a missing
+            # file.
+            shutil.copyfile(src, paths['invwarp'])
             inv_stable.append(paths['invwarp'])
         else:
             inv_stable.append(paths['warp'])
