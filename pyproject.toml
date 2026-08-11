@@ -26,6 +26,10 @@ dependencies = [
 [project.optional-dependencies]
 viz = ["nilearn>=0.10", "plotly>=5.18"]
 dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.4"]
+# Lightweight, self-contained demo pillar (tuba.mini): fetches the
+# ITRUSST benchmark skull STLs + MNI152 template. antspyx (core dep) is
+# needed only to build the transforms; consuming cached products is not.
+mini = ["trimesh>=4.0", "nilearn>=0.10"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
