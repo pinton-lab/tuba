@@ -448,16 +448,17 @@ blob_urls = []  # discovered from the NITRC file-release page by fetch_validate2
 license = "CC BY"
 auth_required = "click-through"
 fetcher_script = "src/tuba/data/fetch_validate29.py"
-format = "zip of NIfTI (templates + label volumes + LUT)"
+format = "zip of NIfTI (templates + label volume + brain mask + LUT)"
 voxel_mm = 0.3
 approx_size_gb = 0.03
 archive_name = "VALiDATe29.zip"
+sha256 = "verify-on-stage"  # placeholder: pin once a release is downloaded
 n_specimens = 29
-notes = "Built from 29 squirrel monkeys at the Vanderbilt University Institute of Imaging Science. RRID:SCR_015542. Ships anatomical (proton-density, T1, T2*), diffusion (FA, MD) and ex-vivo templates plus histologically-defined cortical labels and tractography-defined white-matter labels, all in one ~30 MB VALiDATe29.zip. Exact internal filenames drift across releases 1.0/1.1/1.2, so tuba.atlases.validate29.VALiDATe29 resolves template/labels/LUT by keyword glob (overridable). Distributed CC BY via NITRC's click-through FRS; fetch_validate29.py discovers the newest download.php/<id>/VALiDATe29.zip link ($VALIDATE29_URL overrides). Working template resolution ~0.3 mm (in/ex-vivo channels differ); voxel_mm is nominal."
+notes = "Built from 29 squirrel monkeys at the Vanderbilt University Institute of Imaging Science. RRID:SCR_015542. Confirmed against the staged v1.2 release (2026-08-18): 30.4 MB zip, all volumes 212x212x212 at 0.300 mm isotropic. Ships anatomical (VALiDATe12-t1, VALiDATe22-t2, VALiDATe18-pd), diffusion (VALiDATe7-invivo-fa/md, VALiDATe5-exvivo-fa), ex-vivo structural, a brain mask (VALiDATe-brainmask, ~33 mL) and a discrete cortical+WM label volume (VALiDATe3-labels) with a space-delimited LUT (VALiDATe-labels.txt) -- NOT ITK-SNAP format. Zip double-nests VALiDATe29/VALiDATe29/ and carries __MACOSX cruft; tuba.atlases.validate29.VALiDATe29 walks recursively, ignores the cruft, and resolves template/labels/mask/LUT by keyword. Distributed CC BY via NITRC's click-through FRS; fetch_validate29.py discovers the newest download.php/<id>/VALiDATe29.zip link (observed id 12413; $VALIDATE29_URL overrides)."
 
 [saimiri.atlas_annotation]
 role = "atlas_annotation"
-description = "VALiDATe29 histologically-defined cortical + white-matter labels (S1 areas 3a/3b/1/2, M1 area 4), Saimiri sciureus"
+description = "VALiDATe29 histologically-defined cortical + white-matter labels (region-level: S1=anterior parietal cortex, M1=primary motor cortex), Saimiri sciureus"
 citation = "K. G. Schilling, Y. Gao, I. Stepniewska, T.-L. Wu, F. Wang, B. A. Landman, J. C. Gore, L. M. Chen, A. W. Anderson. The VALiDATe29 MRI Based Multi-Channel Atlas of the Squirrel Monkey Brain. Neuroinformatics 15(4):343-364, 2017."
 doi = "https://doi.org/10.1007/s12021-017-9334-0"
 source_url = "https://www.nitrc.org/projects/validate29/"
@@ -465,8 +466,8 @@ blob_urls = []  # bundled inside VALiDATe29.zip (see saimiri.atlas_template)
 license = "CC BY"
 auth_required = "click-through"
 fetcher_script = "src/tuba/data/fetch_validate29.py"
-format = "NIfTI label volume + LUT"
+format = "NIfTI label volume (VALiDATe3-labels) + space-delimited LUT"
 voxel_mm = 0.3
 approx_size_gb = 0.01
 n_specimens = 29
-notes = "Cortical labels derived from co-registered Nissl/myelin histology (Kaas-lab somatosensory/motor parcellation): S1 areas 3a/3b/1/2 and M1 (area 4) carry the hand representations this pillar targets. Bundled inside VALiDATe29.zip; do not fetch separately. Exact label spellings must be confirmed against the staged LUT -- tuba.atlases.validate29.resolve_label matches area-number substrings ('area 3b', 'area 1', 'area 4') which are stable across the naming variants."
+notes = "Discrete label volume (86 label ids present, 212^3 @ 0.3 mm) from co-registered Nissl/myelin histology. GRANULARITY (confirmed against the staged VALiDATe-labels.txt, 2026-08-18): the parcellation is REGION-LEVEL, not Brodmann-area-level -- there is no separate 'area 3b'/'area 1'/'area 4' label. The study's S1 hand areas 3a/3b/1/2 are bundled into l/r anterior_parietal_cortex (APC, ids 11/12) and M1 into l/r primary_motor_cortex (ids 3/4); PV/S2 is ids 7/8. Left and right hemispheres are SEPARATE ids (unlike WHS). tuba.atlases.validate29.resolve_label maps S1->APC, M1->primary_motor, S2->PV, hemisphere-aware. Splitting 3b from area 1, or isolating the hand knob, needs a stereotaxic prior not in the distributed volume. Bundled inside VALiDATe29.zip; do not fetch separately."

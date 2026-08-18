@@ -335,14 +335,19 @@ def register_to_atlas(force=False, verbose=True):
 
 
 # ---------------------------------------------------------------------------
-# Targets: S1 (areas 3b, 1) + M1 hand representations (deliverable 2)
+# Targets: S1 + M1 (deliverable 2)
 # ---------------------------------------------------------------------------
-TARGET_KEYS = ('S1_3b', 'S1_area1', 'M1')
+# VALiDATe29's histological parcellation is region-level (confirmed
+# against the staged LUT, 2026-08-18): the study's S1 hand areas 3b/1
+# map to anterior_parietal_cortex (APC, which bundles areas 3a/3b/1/2)
+# and M1 to primary_motor_cortex. Left/right are separate label ids.
+TARGET_KEYS = ('S1', 'M1')
 
 
-def _label_centroid_world_mm(label_id, hemisphere=None):
-    """Centroid (subject RAS mm) of a warped VALiDATe29 label id, optionally
-    restricted to one hemisphere by sign of x."""
+def _label_centroid_world_mm(label_id):
+    """Centroid (subject RAS mm) + voxel count of a warped VALiDATe29 label
+    id. Left/right are already separate ids in VALiDATe29, so the caller
+    picks the hemisphere via :meth:`VALiDATe29.resolve_label`; no x-split."""
     import nibabel as nib
     img = nib.load(ANNOT_NII)
     arr = np.asarray(img.dataobj)
@@ -351,39 +356,35 @@ def _label_centroid_world_mm(label_id, hemisphere=None):
     if len(ijk) == 0:
         raise RuntimeError(f'No voxels with label id {label_id} in {ANNOT_NII}')
     ras = (aff[:3, :3] @ ijk.T).T + aff[:3, 3]
-    if hemisphere == 'left':
-        ras = ras[ras[:, 0] < 0]
-    elif hemisphere == 'right':
-        ras = ras[ras[:, 0] > 0]
-    if len(ras) == 0:
-        raise RuntimeError(f'No {hemisphere!r} voxels for label {label_id}')
-    return ras.mean(0), int(len(ras))
+    return ras.mean(0), int(len(ijk))
 
 
 def target_world_mm(target_key, hemisphere='left'):
-    """Subject-space RAS-mm centroid of a study target
-    (``'S1_3b'`` / ``'S1_area1'`` / ``'M1'``), resolved through the
-    VALiDATe29 cortical labels warped into subject space.
+    """Subject-space RAS-mm centroid of a study target (``'S1'`` / ``'M1'``),
+    resolved through the VALiDATe29 cortical labels warped into subject
+    space. ``hemisphere`` selects the ``l_``/``r_`` label id.
 
-    NOTE: this returns the whole-area centroid. Localizing the *hand*
-    sub-representation within the area needs VALiDATe29's stereotaxic
-    frame (a mediolateral/AP prior on the homunculus); that prior is
-    applied by ``export_targets(hand_prior=...)`` once the atlas
-    coordinate frame is confirmed against the staged LUT.
+    NOTE: this returns the whole-area centroid --- for S1 that is anterior
+    parietal cortex (areas 3a/3b/1/2 bundled). Isolating the *hand*
+    sub-representation (or splitting 3b from area 1) needs a stereotaxic
+    prior on the homunculus, not derivable from the distributed label
+    volume; wire it into ``export_targets(hand_prior=...)`` when the
+    subject stereotaxic frame is fixed.
     """
     if not os.path.exists(ANNOT_NII):
         raise FileNotFoundError(
             f'{ANNOT_NII} missing; run register_to_atlas() first.')
-    name, label_id = ATLAS.resolve_label(target_key)
-    world, n = _label_centroid_world_mm(label_id, hemisphere=hemisphere)
+    name, label_id = ATLAS.resolve_label(target_key, hemisphere=hemisphere)
+    world, n = _label_centroid_world_mm(label_id)
     return {'target': target_key, 'atlas_label': name, 'label_id': label_id,
             'hemisphere': hemisphere, 'world_mm': tuple(float(v) for v in world),
             'n_vox': n}
 
 
 def export_targets(hemisphere='left', verbose=True):
-    """Export S1-3b, S1-area-1, and M1 target coordinates (subject RAS mm)
-    to :data:`TARGETS_JSON`, alongside the transform prefix. Deliverable 2.
+    """Export S1 (anterior parietal cortex) and M1 (primary motor cortex)
+    target coordinates (subject RAS mm) to :data:`TARGETS_JSON`, alongside
+    the transform prefix. Deliverable 2.
     """
     import json
     out = {'frame': 'saimiri_aligned_native_RAS',

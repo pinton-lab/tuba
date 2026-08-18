@@ -49,15 +49,23 @@ from typing import Optional
 # Cortical target groups for the somatosensory/motor circuit this pillar
 # studies. Each entry is a tuple of case-insensitive substrings; the
 # first label whose name contains ANY of them (see :meth:`resolve_label`)
-# is used. The squirrel-monkey somatosensory areas follow the Kaas-lab
-# Brodmann-style parcellation carried by VALiDATe29's histological labels
-# (areas 3a/3b/1/2 in S1, area 4 in M1). Exact spellings vary with the
-# staged .label/LUT, so match on the area number substrings, which are
-# stable, rather than on a full canonical name.
+# is used.
+#
+# IMPORTANT -- atlas granularity (confirmed against the staged
+# VALiDATe-labels.txt, 2026-08-18): VALiDATe29's histological cortical
+# parcellation is *region-level*, not Brodmann-area-level. There is no
+# separate ``area 3b`` / ``area 1`` / ``area 4`` label. In the squirrel
+# monkey the primary somatosensory hand areas 3a/3b/1/2 are bundled into
+# ``anterior_parietal_cortex`` (APC; l/r ids 11/12) and the primary
+# motor cortex is ``primary_motor_cortex`` (M1; l/r ids 3/4). Left and
+# right hemispheres are SEPARATE label ids (unlike WHS), so
+# :meth:`resolve_label` is hemisphere-aware. Separating 3b from area 1
+# within APC, or isolating the hand knob, needs a stereotaxic prior on
+# the homunculus (not derivable from the distributed label volume).
 TARGET_LABEL_KEYWORDS = {
-    'S1_3b': ('area 3b', '3b', 'brodmann area 3b'),
-    'S1_area1': ('area 1', 'brodmann area 1'),
-    'M1': ('area 4', 'primary motor', 'm1', 'brodmann area 4'),
+    'S1': ('anterior_parietal', 'anterior parietal'),          # APC = S1 (3a/3b/1/2)
+    'M1': ('primary_motor', 'primary motor'),                  # primary motor cortex
+    'S2': ('parietal_ventral', 'secondary_somatosensory'),     # PV/S2
 }
 
 
@@ -72,15 +80,15 @@ class VALiDATe29:
         Defaults to ``$VALIDATE29_DEST`` then
         ``~/.cache/tuba/saimiri/atlas/validate29``.
     template_channel : str
-        Preferred anatomical template channel keyword for the fixed
-        image / QC background: one of ``'t2star'``, ``'pd'``, ``'t1'``.
-        The cavity-binary registration uses the derived brain mask, not
+        Preferred in-vivo anatomical template channel for the QC
+        background: one of ``'t2'`` (default), ``'t1'``, ``'pd'``.
+        The cavity-binary registration uses the shipped brain mask, not
         the template intensity, so this only affects QC + fallbacks.
     template_path_override, annotation_path_override, label_table_override :
         Explicit paths that bypass resolution entirely.
     """
     atlas_dir: str = ''
-    template_channel: str = 't2star'
+    template_channel: str = 't2'
     mode: str = 'cavity_binary'
     template_path_override: Optional[str] = None
     annotation_path_override: Optional[str] = None
@@ -94,13 +102,23 @@ class VALiDATe29:
                 os.path.expanduser('~/.cache/tuba/saimiri/atlas/validate29'))
 
     # -- low-level resolution -------------------------------------------------
-    def _niftis(self):
-        pats = ('*.nii', '*.nii.gz')
+    @staticmethod
+    def _is_junk(path):
+        """macOS archive cruft: ``__MACOSX/`` dirs and ``._`` AppleDouble
+        resource forks that ship inside zips made on a Mac (VALiDATe29.zip
+        is one). These masquerade as real files and must be excluded."""
+        b = os.path.basename(path)
+        return '__MACOSX' in path.split(os.sep) or b.startswith('._')
+
+    def _files_matching(self, patterns):
         out = []
         for root, _dirs, _files in os.walk(self.atlas_dir):
-            for p in pats:
+            for p in patterns:
                 out.extend(glob.glob(os.path.join(root, p)))
-        return sorted(out)
+        return sorted(f for f in out if not self._is_junk(f))
+
+    def _niftis(self):
+        return self._files_matching(('*.nii', '*.nii.gz'))
 
     def _resolve_one(self, keywords, kind):
         """Return the single NIfTI whose basename matches any keyword.
@@ -126,61 +144,94 @@ class VALiDATe29:
     def template_path(self) -> str:
         if self.template_path_override:
             return self.template_path_override
-        kw = {'t2star': ('t2star', 't2*', 't2_star'),
-              'pd': ('pd', 'proton'),
-              't1': ('t1',)}.get(self.template_channel, ('t2star',))
+        # In-vivo anatomical channels shipped by VALiDATe29 are t2, t1, pd
+        # (there is no t2star). Keywords are plain substrings matched
+        # against the basename (e.g. 'VALiDATe22-t2.nii.gz').
+        kw = {'t2': ('-t2', '_t2', 't2'),
+              't1': ('-t1', '_t1', 't1'),
+              'pd': ('-pd', '_pd', 'pd', 'proton')}.get(
+                  self.template_channel, ('-t2', 't2'))
         return self._resolve_one(kw, f'{self.template_channel} template')
 
     @property
     def annotation_path(self) -> str:
         if self.annotation_path_override:
             return self.annotation_path_override
-        return self._resolve_one(
-            ('label', 'labels', 'seg', 'parcel', 'atlas', 'cortic'),
-            'cortical-label')
+        # Only the discrete cortical/WM label volume, not the brain mask.
+        cands = [c for c in self._niftis()
+                 if 'label' in os.path.basename(c).lower()
+                 and 'mask' not in os.path.basename(c).lower()]
+        if len(cands) == 1:
+            return cands[0]
+        return self._resolve_one(('label', 'seg', 'parcel', 'dseg'),
+                                 'cortical-label')
+
+    @property
+    def shipped_brain_mask_path(self) -> Optional[str]:
+        """The atlas's own brain mask if it ships one (VALiDATe29 does:
+        ``VALiDATe-brainmask.nii.gz``), else ``None``."""
+        cands = [c for c in self._niftis()
+                 if any(k in os.path.basename(c).lower()
+                        for k in ('brainmask', 'brain_mask', 'brain-mask', 'mask'))]
+        return cands[0] if len(cands) == 1 else (cands[0] if cands else None)
 
     @property
     def brain_mask_path(self) -> str:
-        return os.path.join(self.atlas_dir, 'validate29_brain_mask.nii.gz')
+        """Fixed image for the cavity_binary SyN. Prefer the shipped mask;
+        otherwise the derive path under ``atlas_dir``."""
+        shipped = self.shipped_brain_mask_path
+        return shipped or os.path.join(self.atlas_dir,
+                                       'validate29_brain_mask.nii.gz')
 
     @property
     def label_table_path(self) -> str:
         if self.label_table_override:
             return self.label_table_override
-        for pat in ('*.label', '*.lut', '*.txt', '*.tsv', '*.csv'):
-            hits = []
-            for root, _d, _f in os.walk(self.atlas_dir):
-                hits.extend(glob.glob(os.path.join(root, pat)))
+        for pat in ('*.label', '*.lut'):
+            hits = self._files_matching((pat,))
             if hits:
-                return sorted(hits)[0]
+                return hits[0]
+        # Delimited text tables: prefer a name containing 'label', and
+        # never pick LICENSE/README/NOTICE.
+        txt = [h for h in self._files_matching(('*.txt', '*.tsv', '*.csv'))
+               if not any(x in os.path.basename(h).lower()
+                          for x in ('license', 'readme', 'notice', 'changelog'))]
+        labelled = [h for h in txt if 'label' in os.path.basename(h).lower()]
+        if labelled:
+            return labelled[0]
+        if txt:
+            return txt[0]
         raise FileNotFoundError(
             f'No label table (.label/.lut/.txt/.tsv/.csv) under '
             f'{self.atlas_dir!r}. Pass label_table_override.')
 
     # -- brain mask (fixed image for cavity_binary SyN) ----------------------
     def derive_brain_mask(self, force: bool = False, verbose: bool = True):
-        """Binary brain mask from the cortical/white-matter label volume
-        (any non-zero label is brain). Written to
-        ``<atlas_dir>/validate29_brain_mask.nii.gz``.
-
-        As with the WHS rat binding, we mask by ``label > 0`` rather than
-        thresholding a template channel, since the anatomical templates
-        carry soft-tissue/background that no fixed threshold cleanly
-        separates from brain.
+        """Return the atlas brain mask (fixed image for the cavity_binary
+        SyN). VALiDATe29 ships its own ``VALiDATe-brainmask.nii.gz``, so we
+        use it directly (no ANTs needed). Only if no mask ships do we
+        derive one from the label volume (``label > 0``), as the WHS rat
+        binding does.
         """
+        shipped = self.shipped_brain_mask_path
+        if shipped:
+            if verbose:
+                print(f'  using shipped VALiDATe29 brain mask: {shipped}')
+            return shipped
         import ants
-        if os.path.exists(self.brain_mask_path) and not force:
-            return self.brain_mask_path
+        out = os.path.join(self.atlas_dir, 'validate29_brain_mask.nii.gz')
+        if os.path.exists(out) and not force:
+            return out
         if verbose:
             print(f'Deriving VALiDATe29 brain mask from {self.annotation_path}')
         a = ants.image_read(self.annotation_path)
         mask = (a.numpy() > 0).astype('float32')
-        ants.image_write(a.new_image_like(mask), self.brain_mask_path)
+        ants.image_write(a.new_image_like(mask), out)
         if verbose:
             vox_ml = abs(a.spacing[0]) * abs(a.spacing[1]) * abs(a.spacing[2]) / 1000.0
             print(f'  brain mask: {int(mask.sum())} vox = '
-                  f'{int(mask.sum()) * vox_ml:.3f} mL -> {self.brain_mask_path}')
-        return self.brain_mask_path
+                  f'{int(mask.sum()) * vox_ml:.3f} mL -> {out}')
+        return out
 
     # -- label table parsing --------------------------------------------------
     def _parse_label_table(self) -> dict:
@@ -222,22 +273,34 @@ class VALiDATe29:
     def all_structures(self) -> dict:
         return dict(self._parse_label_table())
 
-    def resolve_label(self, target: str):
-        """Map a pillar target key (``'S1_3b'`` / ``'S1_area1'`` / ``'M1'``)
-        or a raw substring to an atlas ``(name, id)`` via
-        :data:`TARGET_LABEL_KEYWORDS`. Returns the first matching label
-        (lowest id on ties). Raises ``KeyError`` with the available cortical
-        names if nothing matches -- so the exact atlas spelling can be pinned.
+    def resolve_label(self, target: str, hemisphere: Optional[str] = None):
+        """Map a pillar target key (``'S1'`` / ``'M1'`` / ``'S2'``) or a raw
+        substring to an atlas ``(name, id)`` via
+        :data:`TARGET_LABEL_KEYWORDS`.
+
+        VALiDATe29 lateralises structures into separate ``l_``/``r_`` label
+        ids, so pass ``hemisphere='left'|'right'`` to pick the matching
+        hemisphere; otherwise the lowest matching id (typically left) wins.
+        Raises ``KeyError`` listing the cortical names present if nothing
+        matches -- so an unexpected atlas spelling surfaces loudly.
         """
         table = self._parse_label_table()
         keywords = TARGET_LABEL_KEYWORDS.get(target, (target,))
         kw = tuple(k.lower() for k in keywords)
         hits = sorted((idx, name) for name, idx in table.items()
                       if any(k in name.lower() for k in kw))
+        if hemisphere in ('left', 'right'):
+            pref = 'l_' if hemisphere == 'left' else 'r_'
+            hemi = [(i, n) for i, n in hits if n.lower().startswith(pref)]
+            if hemi:
+                hits = hemi
         if not hits:
+            cortical = [n for n in table
+                        if any(t in n.lower()
+                               for t in ('cortex', 'cort', 'parietal', 'motor',
+                                         'somatosensory'))]
             raise KeyError(
                 f'No VALiDATe29 label matches target {target!r} '
-                f'(keywords {keywords}). Cortical-like names present: '
-                f'{[n for n in table if any(t in n.lower() for t in ("area", "cort", "s1", "m1"))][:12]}')
+                f'(keywords {keywords}). Cortical names present: {cortical[:16]}')
         idx, name = hits[0]
         return name, idx

@@ -145,47 +145,66 @@ def test_grid_convergence_tof_smooth_profile():
 # 4. VALiDATe29 resolution + target mapping + affine round-trip (D2)
 # ---------------------------------------------------------------------------
 def _write_synthetic_atlas(tmp_path):
+    """A synthetic VALiDATe29 mirroring the REAL layout: t1/t2/pd channels,
+    a shipped brain mask, a region-level (l_/r_ separated) label volume,
+    a space-delimited LUT with a section header, a decoy LICENSE.txt, and
+    macOS ``__MACOSX``/``._`` cruft the resolver must ignore."""
     nib = pytest.importorskip('nibabel')
-    aff = np.eye(4)
+    aff = np.eye(4) * 0.3
+    aff[3, 3] = 1.0
     aff[:3, 3] = [-15, -15, -15]
-    # Template channel (T2*) and a cortical label volume with 3 areas.
     tmpl = np.zeros((30, 30, 30), np.float32)
     tmpl[5:25, 5:25, 5:25] = 1.0
     labels = np.zeros((30, 30, 30), np.int16)
-    labels[8:12, 10:20, 10:20] = 3     # "Area 3b"
-    labels[12:16, 10:20, 10:20] = 4    # "Area 1"
-    labels[18:22, 10:20, 10:20] = 7    # "Area 4" (M1)
-    nib.save(nib.Nifti1Image(tmpl, aff),
-             str(tmp_path / 'VALiDATe29_T2star.nii.gz'))
+    labels[4:8, 12:18, 12:18] = 3      # l_primary_motor_cortex (M1)
+    labels[22:26, 12:18, 12:18] = 4    # r_primary_motor_cortex (M1)
+    labels[8:12, 12:18, 12:18] = 11    # l_anterior_parietal_cortex (S1/APC)
+    labels[18:22, 12:18, 12:18] = 12   # r_anterior_parietal_cortex (S1/APC)
+    mask = (labels > 0).astype(np.uint8)
+    nib.save(nib.Nifti1Image(tmpl, aff), str(tmp_path / 'VALiDATe22-t2.nii.gz'))
+    nib.save(nib.Nifti1Image(tmpl, aff), str(tmp_path / 'VALiDATe12-t1.nii.gz'))
     nib.save(nib.Nifti1Image(labels, aff),
-             str(tmp_path / 'VALiDATe29_cortical_labels.nii.gz'))
-    with open(tmp_path / 'VALiDATe29.label', 'w') as f:
-        f.write('# ITK-SNAP label table\n')
-        f.write('0    0   0   0   0  0  0  "Clear Label"\n')
-        f.write('3  255   0   0   1  1  1  "Area 3b"\n')
-        f.write('4    0 255   0   1  1  1  "Area 1"\n')
-        f.write('7    0   0 255   1  1  1  "Area 4 (M1)"\n')
+             str(tmp_path / 'VALiDATe3-labels.nii.gz'))
+    nib.save(nib.Nifti1Image(mask, aff),
+             str(tmp_path / 'VALiDATe-brainmask.nii.gz'))
+    with open(tmp_path / 'VALiDATe-labels.txt', 'w') as f:
+        f.write('Gray Matter\n')
+        f.write('3 l_primary_motor_cortex M1\n')
+        f.write('4 r_primary_motor_cortex M1\n')
+        f.write('11 l_anterior_parietal_cortex APC\n')
+        f.write('12 r_anterior_parietal_cortex APC\n')
+    with open(tmp_path / 'LICENSE.txt', 'w') as f:
+        f.write('CC BY. This is not a label table.\n')
+    junk = tmp_path / '__MACOSX'
+    junk.mkdir()
+    nib.save(nib.Nifti1Image(labels, aff),
+             str(junk / '._VALiDATe3-labels.nii.gz'))   # must be ignored
     return tmp_path
 
 
 def test_validate29_resolution_and_targets(tmp_path):
     _write_synthetic_atlas(tmp_path)
     from tuba.atlases.validate29 import VALiDATe29
-    v = VALiDATe29(atlas_dir=str(tmp_path), template_channel='t2star')
+    v = VALiDATe29(atlas_dir=str(tmp_path))            # default channel t2
 
-    assert os.path.basename(v.template_path) == 'VALiDATe29_T2star.nii.gz'
-    assert 'labels' in os.path.basename(v.annotation_path)
-    assert os.path.basename(v.label_table_path) == 'VALiDATe29.label'
+    assert os.path.basename(v.template_path) == 'VALiDATe22-t2.nii.gz'
+    assert os.path.basename(v.annotation_path) == 'VALiDATe3-labels.nii.gz'
+    # label table must be the LUT, never LICENSE.txt
+    assert os.path.basename(v.label_table_path) == 'VALiDATe-labels.txt'
+    # shipped brain mask is preferred (no derive / no ANTs)
+    assert os.path.basename(v.shipped_brain_mask_path) == 'VALiDATe-brainmask.nii.gz'
+    assert v.derive_brain_mask(verbose=False) == v.shipped_brain_mask_path
 
-    table = v.all_structures()
-    assert table == {'Area 3b': 3, 'Area 1': 4, 'Area 4 (M1)': 7}
-
-    assert v.resolve_label('S1_3b') == ('Area 3b', 3)
-    assert v.resolve_label('S1_area1') == ('Area 1', 4)
-    assert v.resolve_label('M1') == ('Area 4 (M1)', 7)
+    # region-level parcellation, hemisphere-separated ids
+    assert v.resolve_label('S1', hemisphere='left') == ('l_anterior_parietal_cortex APC', 11)
+    assert v.resolve_label('S1', hemisphere='right') == ('r_anterior_parietal_cortex APC', 12)
+    assert v.resolve_label('M1', hemisphere='left') == ('l_primary_motor_cortex M1', 3)
+    assert v.resolve_label('M1', hemisphere='right') == ('r_primary_motor_cortex M1', 4)
+    # no hemisphere -> lowest matching id (left)
+    assert v.resolve_label('M1')[1] == 3
 
     with pytest.raises(KeyError):
-        v.resolve_label('S1_area2')      # no matching label -> helpful raise
+        v.resolve_label('V1')            # not in synthetic LUT -> helpful raise
 
 
 def test_registration_affine_round_trip():
