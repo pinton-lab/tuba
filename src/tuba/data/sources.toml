@@ -413,3 +413,60 @@ companion_files = [
     { name = "WHS_SD_rat_atlas_v4.01.label", sha256 = "e30991cfce0ff03d1aba6bc10f2863fbe78087b7e380e7ecb508fcbd235839e7", size_mb = 0.02 },
 ]
 notes = "v4.01 of the WHS Sprague Dawley label volume: 222 structures (112 new, 57 revised vs v3). Registered to WHS_SD_rat_T2star_v1.01.nii.gz which ships inside the v4 pack zip (see rat.atlas_template). Companion .label file is the ITK-SNAP colormap + name table."
+
+# =============================================================================
+# Squirrel monkey (Saimiri sciureus)  -- NIH R01 EB037345, Aim 3
+# =============================================================================
+# GEOMETRY-ONLY pillar: the subject skull is an uncalibrated museum microCT
+# (no HU phantom), so tuba.core.hu_acoustics.AubryHUMapping REFUSES to run on
+# it and the slab loader uses an explicitly-flagged placeholder ramp. Swap in
+# an HU-calibrated colony CT (Vanderbilt) to enable quantitative acoustics.
+
+[saimiri.skull]
+role = "skull"
+description = "Saimiri sciureus dry-skull microCT, USNM 338948, 0.1189 mm iso (UTCT / DigiMorph; oVert mirror on MorphoSource)"
+citation = "J. Rossie. Saimiri sciureus (On-line), Digital Morphology, University of Texas High-Resolution X-ray CT Facility (UTCT), 2002, https://digimorph.org/specimens/Saimiri_sciureus/338948/. Collection context: L. E. Copes, L. A. B. Lucas, J. O. Thostenson, H. E. Hoekstra, D. M. Boyer. A collection of non-human primate computed tomography scans housed in MorphoSource. Sci Data 3:160001, 2016."
+doi = "https://doi.org/10.1038/sdata.2016.1"
+source_url = "https://digimorph.org/specimens/Saimiri_sciureus/338948/"
+blob_urls = []
+license = "interactive-only (UTCT/DigiMorph educational-research terms; MorphoSource per-record approval)"
+auth_required = "click-through"
+fetcher_script = "src/tuba/data/fetch_saimiri.py"
+format = "TIFF stack"
+voxel_mm = 0.1189
+approx_size_gb = 0.6
+n_specimens = 1
+notes = "USNM 338948 (National Museum of Natural History), scanned by UTCT: 540 slices, 0.1189 mm isotropic, 54.0 mm field of reconstruction. Squirrel-monkey calvarium is 1.0-1.5 mm (rat-like) = ~8-13 voxels at this pitch. UNCALIBRATED (arbitrary reconstruction counts, no HU phantom): staged for GEOMETRY ONLY. DigiMorph lists the raw stack as request-only; the same oVert/oUTCT specimens are mirrored on MorphoSource (e.g. media 000039292) behind a free-account per-record approval, same pattern as macaque.skull. fetch_saimiri.py prints the source URLs + drop location and unpacks any archive that lands locally. sha256 omitted until a specific staged archive is pinned."
+
+[saimiri.atlas_template]
+role = "atlas_template"
+description = "VALiDATe29 squirrel-monkey MRI atlas -- multi-channel templates (PD/T1/T2*, FA/MD, ex-vivo), Saimiri sciureus"
+citation = "K. G. Schilling, Y. Gao, I. Stepniewska, T.-L. Wu, F. Wang, B. A. Landman, J. C. Gore, L. M. Chen, A. W. Anderson. The VALiDATe29 MRI Based Multi-Channel Atlas of the Squirrel Monkey Brain. Neuroinformatics 15(4):343-364, 2017."
+doi = "https://doi.org/10.1007/s12021-017-9334-0"
+source_url = "https://www.nitrc.org/projects/validate29/"
+blob_urls = []  # discovered from the NITRC file-release page by fetch_validate29
+license = "CC BY"
+auth_required = "click-through"
+fetcher_script = "src/tuba/data/fetch_validate29.py"
+format = "zip of NIfTI (templates + label volumes + LUT)"
+voxel_mm = 0.3
+approx_size_gb = 0.03
+archive_name = "VALiDATe29.zip"
+n_specimens = 29
+notes = "Built from 29 squirrel monkeys at the Vanderbilt University Institute of Imaging Science. RRID:SCR_015542. Ships anatomical (proton-density, T1, T2*), diffusion (FA, MD) and ex-vivo templates plus histologically-defined cortical labels and tractography-defined white-matter labels, all in one ~30 MB VALiDATe29.zip. Exact internal filenames drift across releases 1.0/1.1/1.2, so tuba.atlases.validate29.VALiDATe29 resolves template/labels/LUT by keyword glob (overridable). Distributed CC BY via NITRC's click-through FRS; fetch_validate29.py discovers the newest download.php/<id>/VALiDATe29.zip link ($VALIDATE29_URL overrides). Working template resolution ~0.3 mm (in/ex-vivo channels differ); voxel_mm is nominal."
+
+[saimiri.atlas_annotation]
+role = "atlas_annotation"
+description = "VALiDATe29 histologically-defined cortical + white-matter labels (S1 areas 3a/3b/1/2, M1 area 4), Saimiri sciureus"
+citation = "K. G. Schilling, Y. Gao, I. Stepniewska, T.-L. Wu, F. Wang, B. A. Landman, J. C. Gore, L. M. Chen, A. W. Anderson. The VALiDATe29 MRI Based Multi-Channel Atlas of the Squirrel Monkey Brain. Neuroinformatics 15(4):343-364, 2017."
+doi = "https://doi.org/10.1007/s12021-017-9334-0"
+source_url = "https://www.nitrc.org/projects/validate29/"
+blob_urls = []  # bundled inside VALiDATe29.zip (see saimiri.atlas_template)
+license = "CC BY"
+auth_required = "click-through"
+fetcher_script = "src/tuba/data/fetch_validate29.py"
+format = "NIfTI label volume + LUT"
+voxel_mm = 0.3
+approx_size_gb = 0.01
+n_specimens = 29
+notes = "Cortical labels derived from co-registered Nissl/myelin histology (Kaas-lab somatosensory/motor parcellation): S1 areas 3a/3b/1/2 and M1 (area 4) carry the hand representations this pillar targets. Bundled inside VALiDATe29.zip; do not fetch separately. Exact label spellings must be confirmed against the staged LUT -- tuba.atlases.validate29.resolve_label matches area-number substrings ('area 3b', 'area 1', 'area 4') which are stable across the naming variants."
