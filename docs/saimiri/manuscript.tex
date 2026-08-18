@@ -1,0 +1,547 @@
+% Saimiri sciureus museum-microCT + VALiDATe29 squirrel-monkey brain atlas.
+% Geometry-only pillar (deliverables 1-2); no colony CT staged yet, so the
+% quantitative acoustics are guarded, not measured. Build:
+%   pdflatex manuscript
+%   pdflatex manuscript
+
+\documentclass{compactarticle}
+
+\usepackage{amsmath,amssymb,amsfonts,bm}
+\usepackage{graphicx}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{ragged2e}
+\usepackage{url}
+
+\graphicspath{{figures/}}
+
+\providecommand{\br}{\toprule}
+\providecommand{\mr}{\midrule}
+\providecommand{\TODO}[1]{\textcolor{red!75!black}{\textbf{[TODO]} #1}}
+\providecommand{\PENDING}[1]{\textcolor{orange!70!black}{\textbf{[pending staged scan]} #1}}
+
+\begin{document}
+\justifying
+\fancyhead[R]{\small\itshape Squirrel-monkey skull + VALiDATe29 pillar}
+
+\articletype{Design \& setup report}
+
+\title{A transcranial focused-ultrasound targeting pipeline for the
+       squirrel monkey: a \emph{Saimiri sciureus} museum microCT
+       registered to the VALiDATe29 brain atlas, with a hard
+       CT-calibration guard (deliverables 1--2)}
+
+\author{Gianmarco F Pinton}
+
+\affil{Joint Department of Biomedical Engineering, University of North
+       Carolina at Chapel Hill and North Carolina State University}
+
+\email{gia@email.unc.edu}
+
+\keywords{transcranial focused ultrasound, squirrel monkey,
+          \emph{Saimiri sciureus}, VALiDATe29, HU calibration,
+          somatosensory cortex, points per wavelength}
+
+\begin{abstract}
+We document the fifth pillar of TUBA --- a transcranial focused
+ultrasound (FUS) pipeline for the common squirrel monkey
+(\emph{Saimiri sciureus}), prepared for NIH R01 EB037345 (Aim~3):
+per-animal skull models for time-reversal aberration correction and
+multifocal beam design targeting the hand representations of primary
+somatosensory (S1 areas 3b and 1) and primary motor (M1, area 4)
+cortex. This report covers \textbf{deliverables 1--2 (the geometry
+stages)} and is scoped, by design decision, to a \emph{geometry-only}
+build: no HU-calibrated colony CT is available yet, so the pillar is
+bootstrapped on an \emph{uncalibrated} museum microCT
+(\emph{Saimiri sciureus} USNM~338948, UT~Austin / DigiMorph,
+0.1189\,mm isotropic) registered to the VALiDATe29 multi-channel MRI
+atlas of the squirrel-monkey brain (Schilling \emph{et al.}\ 2017;
+29 animals, histologically-defined cortical labels). The pillar reuses
+TUBA's core primitives from the mouse/rat/macaque pillars almost
+unchanged --- bone-shell cavity extraction
+(\texttt{tuba.core.cavity.bone\_shell\_cavity}), \texttt{cavity\_binary}
+ANTs SyN (affine\,+\,deformable), atlas-into-subject warp, and the
+beam-aligned $(c,\rho)$ slab export. Its \emph{distinctive}
+contribution is the \textbf{CT-calibration guard} for
+deliverable~1: a new module \texttt{tuba.core.hu\_acoustics} implements
+the Aubry (2003) porosity HU$\,\to\,(\rho,c,\alpha)$ model but
+\emph{refuses to run} on input not flagged Hounsfield-calibrated
+(\texttt{UncalibratedInputError}), so a museum microCT can never
+silently produce quantitatively wrong acoustics; an
+explicitly-flagged placeholder ramp is the sanctioned geometry-only
+fallback. Deliverable~1 also reports the points-per-wavelength (PPW)
+budget across the 2--4\,MHz operating band on the simulation grid, and
+a grid-convergence run of the transcranial time-of-flight aberration
+(the scalar a time-reversal correction must undo). All constants that
+can only be fixed against the \emph{staged} scan (orientation flips,
+intensity thresholds, cavity hull geometry) are marked
+\texttt{PROVISIONAL}; quantitative cavity/registration results and QC
+figures are produced by the end-to-end driver once the scan is staged.
+The downstream wave physics (deliverables 3--7: time-reversal,
+multifocal synthesis, the two-foci feasibility sweep, MI/bioheat
+safety, and the per-animal export artifact) is out of scope for this
+branch and consumes the $(c,\rho,dz)$ slab in the \texttt{fullwave2-*}
+solver siblings. Code: \texttt{src/tuba/species/saimiri.py},
+\texttt{tuba.core.hu\_acoustics}, \texttt{tuba.atlases.validate29};
+data manifest + fetchers at \texttt{src/tuba/data/}.
+\end{abstract}
+
+% =============================================================================
+\section{Scope and status}
+\label{sec:scope}
+
+This is a \emph{design and setup} report, not a validation report: the
+four prior TUBA pillars (mouse, macaque, human, rat) each document a
+pipeline calibrated end-to-end against a staged scan with measured
+cavity volumes, centroids, and focal figures. The squirrel-monkey
+pillar is at an earlier stage by deliberate choice --- the funded
+project targets a Vanderbilt colony, whose HU-calibrated CT is not yet
+in hand, so we build and verify the \emph{machinery} on a public museum
+microCT for geometry, gating the acoustics behind a calibration guard
+(\S\ref{sec:acoustic}) so nothing downstream mistakes an uncalibrated
+skull for a quantitative one. Two decisions frame the branch:
+\begin{enumerate}[leftmargin=*]
+\setlength\itemsep{0pt}
+  \item \textbf{Subject data:} a public museum microCT
+        (\S\ref{sec:source}), geometry only. The HU$\to$acoustics step
+        refuses to run on it.
+  \item \textbf{Scope:} deliverables 1--2 (CT$\to$acoustic model +
+        atlas registration + target export + QC). Deliverables 3--7
+        (the wave-solver study) are out of scope here and live in the
+        \texttt{fullwave2-*} siblings (\S\ref{sec:scope-out}).
+\end{enumerate}
+Where a quantity can only be measured on the staged scan we write
+\PENDING{} rather than a fabricated number.
+
+% =============================================================================
+\section{Source data}
+\label{sec:source}
+
+\paragraph{Skull.} The skull volume is a microCT scan of a
+\emph{Saimiri sciureus} cranium, museum specimen USNM~338948 (National
+Museum of Natural History), scanned at the University of Texas
+High-Resolution X-ray CT Facility (UTCT) and distributed on
+DigiMorph~\cite{digimorph-saimiri}. The reconstruction is 540 axial
+slices at 0.1189\,mm isotropic over a 54.0\,mm field of reconstruction
+--- a dry cranium, no soft tissue. The same openVertebrate / oUTCT
+specimens are mirrored on MorphoSource, the collection the TUBA macaque
+pillar~\cite{tuba-macaque} also draws from (Copes \emph{et
+al.}\ 2016~\cite{copes-2016}). Table~\ref{tab:scan-params} summarises
+the parameters.
+
+\begin{table}[H]
+\centering
+\caption{Saimiri sciureus USNM~338948 scan parameters (DigiMorph
+         specimen page). The intensity axis is \emph{uncalibrated}
+         (no HU phantom in the field of view).}
+\label{tab:scan-params}
+\small
+\begin{tabular}{ll}
+\br
+Specimen & \emph{Saimiri sciureus}, USNM~338948 (NMNH) \\
+Facility & UT Austin High-Resolution X-ray CT (UTCT) \\
+Slices & 540 axial \\
+Voxel & 0.1189\,mm isotropic \\
+Field of reconstruction & 54.0\,mm \\
+Calvarium thickness & 1.0--1.5\,mm ($\sim$8--13 voxels) \\
+Intensity & uncalibrated reconstruction counts \\
+\mr
+\end{tabular}
+\end{table}
+
+\paragraph{Uncalibrated intensity --- the central caveat.}
+Museum microCT carries no hydroxyapatite/HU phantom, so voxel values
+are arbitrary reconstruction counts, not Hounsfield units. Every prior
+TUBA pillar faces the same issue and handles it by anchoring a
+histogram-relative intensity$\to(c,\rho)$ ramp on the cortical-bone
+mode~\cite{tuba-mouse,tuba-macaque}: robust to detector scale, but
+explicitly \emph{not} quantitatively calibrated. For the squirrel
+monkey we make that limitation a hard boundary rather than a footnote
+(\S\ref{sec:acoustic}): the scan is flagged
+\texttt{UNCALIBRATED\_MICROCT} and quantitative acoustics are refused.
+
+\paragraph{Wavelength / PPW criterion.}
+The neuromodulation operating point is $f_0 = 2$\,MHz with a 2--4\,MHz
+design range. The most restrictive wavelength is in the water column
+at 4\,MHz: $\lambda_{\min} = c_{\text{water}}/f = 1500/4\times10^{6} =
+0.375$\,mm. A finite-difference solve wants $\gtrsim 6$ points per
+wavelength there, so the simulation grid pitch is set to
+$\Delta x = 60\,\mu$m (\texttt{SIM\_DX\_M} in
+\texttt{tuba.species.saimiri}); the resulting PPW budget is
+Table~\ref{tab:ppw}. Note the 0.1189\,mm microCT is \emph{coarser}
+than the $60\,\mu$m sim grid, so the skull is up-sampled onto the sim
+grid by the slab sampler (\S\ref{sec:placement}) --- the geometry is
+faithful; only the absolute acoustics are placeholder.
+
+\begin{table}[H]
+\centering
+\caption{Points-per-wavelength budget on the $\Delta x = 60\,\mu$m
+         simulation grid, using the shortest (water) wavelength at each
+         frequency (\texttt{tuba.core.hu\_acoustics.report\_ppw}). All
+         three bands clear the 6-PPW floor.}
+\label{tab:ppw}
+\small
+\begin{tabular}{rrr}
+\br
+Frequency & $\lambda_{\text{water}}$ (mm) & PPW @ $60\,\mu$m \\
+\mr
+2.0\,MHz & 0.750 & 12.50 \\
+3.0\,MHz & 0.500 & 8.33 \\
+4.0\,MHz & 0.375 & 6.25 \\
+\mr
+\end{tabular}
+\end{table}
+
+% =============================================================================
+\section{VALiDATe29 reference atlas}
+\label{sec:atlas}
+
+The brain anatomy is provided by the VALiDATe29 atlas of the squirrel
+monkey brain~\cite{validate29}, built from 29 animals at the Vanderbilt
+University Institute of Imaging Science and distributed CC~BY via
+NITRC (RRID:SCR\_015542). VALiDATe29 is multi-channel: anatomical
+templates (proton-density, $T_1$, $T_2^*$), diffusion templates (FA,
+MD), ex-vivo templates, and --- critically for this project ---
+\textbf{histologically-defined cortical labels} co-registered from
+Nissl/myelin sections, plus tractography-defined white-matter labels.
+It supersedes the earlier single-subject squirrel-monkey MRI
+atlas~\cite{gao-2014}.
+
+\paragraph{Layout tolerance.}
+The exact filenames inside \texttt{VALiDATe29.zip} drift across releases
+1.0/1.1/1.2 (several template channels, more than one label volume), so
+the binding \texttt{tuba.atlases.\allowbreak validate29.\allowbreak
+VALiDATe29} does not hard-code them: it \emph{resolves} the template,
+the cortical-label volume, and the label table by globbing the staged
+directory with keyword heuristics, and raises with the candidate list
+when resolution is ambiguous rather than guessing. Every path is
+overridable by constructor argument or environment variable
+(\texttt{VALIDATE29\_DEST}, \texttt{VALIDATE29\_URL}).
+
+\paragraph{Target structures.}
+The study targets the \emph{hand} representations in S1 areas 3b and 1
+and in M1 (area 4); S1 and M1 are only $\sim$2--3\,mm apart in the
+squirrel monkey, which is precisely why the downstream two-foci
+feasibility question (\S\ref{sec:scope-out}) is non-trivial. Because
+the atlas label spellings vary across releases,
+\texttt{validate29.\allowbreak resolve\_label} matches \emph{stable
+area-number substrings} (\texttt{'area 3b'}, \texttt{'area 1'},
+\texttt{'area 4'}) rather than a full canonical name; the exact
+spelling is confirmed against the staged label table
+(\S\ref{sec:open}). Localising the hand sub-representation \emph{within}
+each area additionally requires VALiDATe29's stereotaxic frame (a
+mediolateral/AP prior on the homunculus), applied once the atlas
+coordinate frame is confirmed; until then \texttt{target\_world\_mm}
+returns the whole-area centroid and says so.
+
+% =============================================================================
+\section{Deliverable 1: CT $\to$ acoustic model, with a calibration guard}
+\label{sec:acoustic}
+
+This is the pillar's distinctive contribution and the reason a
+geometry-only build is safe. The module
+\texttt{tuba.core.hu\_acoustics} provides a \emph{quantitative} HU
+mapping and a hard guard around it.
+
+\paragraph{Porosity model.}
+For Hounsfield-calibrated input we use the Aubry
+(2003)~\cite{aubry-2003} porosity model. Bone porosity is estimated
+from CT radiodensity,
+\begin{equation}
+\Phi(\mathrm{HU}) = 1 - \mathrm{clip}\!\left(
+   \frac{\mathrm{HU}-\mathrm{HU}_{\text{water}}}
+        {\mathrm{HU}_{\text{bone}}-\mathrm{HU}_{\text{water}}},\,0,\,1\right),
+\end{equation}
+with $\Phi = 1$ water/marrow and $\Phi = 0$ dense cortical bone, and
+the acoustic properties interpolate linearly in the bone fraction
+$(1-\Phi)$:
+\begin{align}
+\rho(\Phi) &= \rho_{\text{water}} + (\rho_{\text{bone}}-\rho_{\text{water}})(1-\Phi),\\
+c(\Phi)    &= c_{\text{water}} + (c_{\text{bone}}-c_{\text{water}})(1-\Phi),
+\end{align}
+with cortical endpoints $\rho_{\text{bone}}=1900$\,kg/m$^3$,
+$c_{\text{bone}}=2900$\,m/s consistent with the rat/macaque pillars,
+and water $\rho=1000$\,kg/m$^3$, $c=1500$\,m/s. Attenuation is taken
+proportional to bone fraction between a soft-tissue floor
+(0.5\,dB/cm/MHz) and a cortical-bone value
+(8\,dB/cm/MHz)~\cite{pinton-2012,pichardo-2011}, reported in
+dB/cm/MHz and applied by the downstream solver. SI units throughout.
+
+\paragraph{The guard.}
+\texttt{AubryHUMapping.properties()} raises
+\texttt{UncalibratedInputError} unless the bound
+\texttt{CTCalibration.kind == 'hu'}. The squirrel-monkey scan is a
+museum microCT with no phantom, so the pillar binds
+\texttt{CT\_CALIBRATION = UNCALIBRATED\_MICROCT} and the quantitative
+path is refused by construction. Rather than silently emitting
+physically meaningless densities and sound speeds from arbitrary
+reconstruction counts, the caller must either (a) supply an
+HU-calibrated colony CT --- one line,
+\texttt{CT\_CALIBRATION = CTCalibration(kind='hu',
+hu\_bone\_max=$\langle$scan$\rangle$)} --- which unlocks the
+quantitative mapping automatically, or (b) opt in explicitly to
+\texttt{placeholder\_ramp()}, an intensity$\to(c,\rho)$ ramp carrying
+nominal cortical endpoints and a \texttt{.placeholder = True} tag so
+downstream code can detect the uncalibrated origin. The slab loader
+(\S\ref{sec:placement}) uses the flagged placeholder ramp: geometry is
+faithful, absolute $(c,\rho)$ are nominal.
+
+\paragraph{PPW report + grid convergence.}
+\texttt{acoustic\_model\_report()} prints the calibration state, the
+PPW table (Table~\ref{tab:ppw}) at 2/3/4\,MHz on the sim grid, and ---
+given a placement and a staged scan --- one grid-convergence run of the
+transcranial \emph{time-of-flight aberration}
+\begin{equation}
+\tau = \int \left(\frac{1}{c(x)} - \frac{1}{c_{\text{ref}}}\right)\,dx,
+\end{equation}
+the phase-insertion delay that a time-reversal / phase-conjugation
+correction must undo, computed along the central beam ray at
+$\Delta x$ and $\Delta x/2$ and reported as an absolute and relative
+change. This is a convergence of the acoustic-\emph{property} model
+with voxel pitch, not of a full-wave solve (which lives in the solver
+siblings, \S\ref{sec:scope-out}); it is exactly the quantity the
+downstream aberration correction consumes, so it is the right
+model-side convergence to report here. The units and sign are checked
+in the offline test suite (homogeneous medium $\Rightarrow \tau = 0$;
+a faster bone slab $\Rightarrow \tau < 0$; a smooth profile converges
+as $\Delta x \to 0$).
+
+% =============================================================================
+\section{Deliverable 2: geometry --- cavity, registration, targets}
+\label{sec:geometry}
+
+The geometry stages reuse the rat/macaque dry-skull spine with no
+algorithmic change; only the species constants differ, and the ones
+that depend on the scan are \texttt{PROVISIONAL} until it is staged.
+
+\paragraph{Ingest + orientation (PROVISIONAL).}
+The DigiMorph TIFF stack carries no DICOM affine; as in the rat
+pillar~\cite{tuba-rat} the storage$\to$anatomy mapping is fixed by an
+orientation probe (per-slice bone-mass profile + mid-stack
+orthoslices). The defaults in \texttt{tuba.species.saimiri}
+(\texttt{SWAP\_ROW\_COL=True}, \texttt{VOXEL\_SIGNS}$=(-1,-1,+1)$,
+storage $(\text{slice}{=}AP,\text{row}{=}DV,\text{col}{=}LR)$) follow
+the macaque/rat museum-CT convention and are \emph{provisional} pending
+that probe. At 0.1189\,mm the scan is already near the rat working-cache
+pitch, so a factor-1 reformat to RAS is used rather than a block-max
+downsample.
+
+\paragraph{Endocranial cavity (PROVISIONAL).}
+Squirrel-monkey whole-brain volume is $\sim$22\,mL, so the cavity
+target is $\sim$20--28\,mL; the many dry-cranial openings (orbits,
+foramen magnum) rule out the mouse-style pure-hysteresis extractor for
+the same reason they do in rat and macaque. We therefore use the
+species-agnostic bone-shell extractor
+\texttt{tuba.core.cavity.\allowbreak bone\_shell\_cavity} (per-column
+basicranium floor + per-row plugs + per-axial hull), with hull
+half-extents interpolated between the rat ($\sim$2\,mL) and macaque
+($\sim$90\,mL) pillars (\texttt{HULL\_X\_HALF\_MM}$=18$, etc.). The
+produced volume is checked against the 20--28\,mL target at run time
+and flagged if outside; the measured value is \PENDING{}.
+
+\paragraph{Registration --- \texttt{cavity\_binary} SyN
+(affine\,+\,deformable).}
+Deliverable~2 calls for affine \emph{and} deformable registration, so
+--- unlike the macaque/rat pillars, which stop at a 12-DOF Affine --- we
+use the full \texttt{cavity\_binary} SyN path
+(\texttt{tuba.core.warp.\allowbreak register\_subject\_to\_atlas},
+$\mathrm{fixed}=$ VALiDATe29 brain mask, $\mathrm{moving}=$ subject
+cavity), the same convention the mouse and mini pillars use. The atlas
+template and cortical labels are then pulled back into subject space
+through the saved inverse transforms
+(\texttt{warp\_atlas\_into\_subject}, linear for the template,
+nearest-neighbour for the labels). The brain mask is derived from the
+label volume (\texttt{label $> 0$}), not a template threshold ---
+the same lesson the rat and mouse pillars record.
+
+\paragraph{Target export + QC (deliverable 2 outputs).}
+\texttt{export\_targets()} writes S1-3b, S1-area-1, and M1
+hand-representation coordinates in the subject simulation frame to
+\texttt{saimiri\_targets.json}, alongside the transform prefix, and
+\texttt{qc\_figure()} writes the three-panel orthoslice overlay
+(bone shell, warped VALiDATe29 brain mask, S1/M1 markers). The
+transform is saved under \texttt{\$TUBA\_SAIMIRI\_REG\_DIR} with prefix
+\texttt{saimiri\_cavity\_to\_validate29}. The exported coordinates and
+the QC figure are produced by \texttt{build()} once the scan + atlas
+are staged; their values are \PENDING{}.
+
+% =============================================================================
+\section{Placement and slab export}
+\label{sec:placement}
+
+\texttt{place\_on\_skull} computes the apex/target/beam triple for a
+focused bowl aimed at a study target, and \texttt{load\_slab} returns
+$(c,\rho,dz_{\text{slab}},\text{frame})$ with the \emph{same signature}
+as the mouse/rat/macaque loaders, so any FDTD or angular-spectrum
+driver wired against one species runs on this one unchanged. The slab
+ramp is the flagged placeholder (\S\ref{sec:acoustic}); the cavity is
+overwritten with brain-parenchymal properties ($c=1540$\,m/s,
+$\rho=1040$\,kg/m$^3$) exactly as in the other pillars. This slab is
+the hand-off boundary to the wave-solver siblings.
+
+% =============================================================================
+\section{Out of scope here: the wave-physics study (deliverables 3--7)}
+\label{sec:scope-out}
+
+TUBA is the geometry/atlas/targeting layer; the wave physics lives in
+the \texttt{fullwave2-*} FDTD siblings and consumes the
+$(c,\rho,dz)$ slab and placement this pillar exports. The funded
+study's remaining deliverables are therefore deliberately \emph{not}
+in this branch:
+\begin{enumerate}[leftmargin=*]
+\setlength\itemsep{0pt}
+  \item[D3] time-reversal aberration correction through the individual
+        skull (virtual source at each target $\to$ recorded element
+        signals $\to$ phase-conjugate transmit delays);
+  \item[D4] multifocal beam synthesis --- two simultaneous foci (S1 +
+        M1) with independent amplitude control, plus at least one
+        alternative to superposed time reversal
+        (e.g.\ Gerchberg--Saxton);
+  \item[D5] the feasibility study (highest-priority result): sweep
+        two-foci separation 1.5--4.0\,mm at 2, 3, 4\,MHz through the
+        skull model, reporting $-6$\,dB focal dimensions,
+        peak-to-valley contrast, off-target ratio, and transcranial
+        focal gain;
+  \item[D6] safety margins --- MI at target and skull, and a bioheat
+        estimate over the 400\,kPa / 300\,ms / 3\,s duty cycle;
+  \item[D7] the per-animal targeting artifact (element delays,
+        apodisations, target metadata, safety numbers).
+\end{enumerate}
+The PPW budget (Table~\ref{tab:ppw}) and the time-of-flight
+grid-convergence (\S\ref{sec:acoustic}) are the model-side inputs D3
+and D5 will build on.
+
+% =============================================================================
+\section{Verification}
+\label{sec:tests}
+
+Because no scan is staged, verification is by offline unit tests
+(\texttt{tests/test\_saimiri.py}, 11 tests, no network / no antspyx /
+no data), covering the logic that must hold regardless:
+\begin{itemize}[leftmargin=*]
+\setlength\itemsep{0pt}
+  \item importing the pillar stays ANTs-free (ANTs is lazy inside
+        \texttt{tuba.core.warp} and the atlas binding);
+  \item the calibration guard refuses uncalibrated input on every
+        entry point, and the calibrated Aubry mapping is physically
+        monotonic (porosity $\downarrow$, $\rho/c/\alpha \uparrow$ with
+        HU) with the correct water / cortical endpoints and clamping;
+  \item the placeholder ramp is flagged and maps to nominal endpoints;
+  \item the PPW, time-of-flight-aberration, and grid-convergence maths
+        (homogeneous $\Rightarrow 0$; bone slab $\Rightarrow$ analytic;
+        smooth profile converges);
+  \item VALiDATe29 file/label resolution and S1/M1 target keyword
+        mapping on a synthetic atlas, plus a synthetic affine
+        registration round-trip;
+  \item the data manifest carries the three Saimiri entries with the
+        expected calibration/license semantics.
+\end{itemize}
+The full repository suite is 42 passing (31 prior + 11 new); \texttt{ruff}
+is clean.
+
+% =============================================================================
+\section{Open items}
+\label{sec:open}
+
+The pillar's machinery is complete and tested; the remaining items all
+require the staged scan (and, for quantitative acoustics, an
+HU-calibrated colony CT):
+\begin{enumerate}[leftmargin=*]
+\setlength\itemsep{0pt}
+  \item Stage the museum microCT (\texttt{python -m
+        tuba.data.fetch\_saimiri}) and the VALiDATe29 atlas
+        (\texttt{python -m tuba.data.fetch\_validate29}), then run
+        \texttt{python -m tuba.species.saimiri build}.
+  \item Calibrate the \texttt{PROVISIONAL} constants (orientation
+        flips, intensity thresholds, cavity hull) against the staged
+        scan via the orientation/histogram probe, exactly as the rat
+        pillar~\cite{tuba-rat} documents; report the measured cavity
+        volume against the 20--28\,mL target and produce the cavity +
+        registration QC figures.
+  \item Confirm the VALiDATe29 cortical-label spellings against the
+        staged LUT and pin them (\S\ref{sec:atlas}); add the
+        stereotaxic hand-sub-representation prior.
+  \item When a Vanderbilt colony CT is available, set
+        \texttt{CT\_CALIBRATION} to an \texttt{hu} calibration to
+        unlock the quantitative Aubry mapping, and run the
+        grid-convergence with the real property field.
+  \item Hand the exported slab + targets to the \texttt{fullwave2-*}
+        siblings for deliverables 3--7 (\S\ref{sec:scope-out}).
+\end{enumerate}
+
+% =============================================================================
+\begin{thebibliography}{99}
+
+\bibitem{digimorph-saimiri} J.~Rossie,
+  ``\emph{Saimiri sciureus} (On-line), USNM~338948,''
+  Digital Morphology Library (DigiMorph), University of Texas
+  High-Resolution X-ray CT Facility, 2002.
+  \url{https://digimorph.org/specimens/Saimiri_sciureus/338948/}
+  (accessed 2026-08-18).
+
+\bibitem{copes-2016} L.~E.~Copes, L.~A.~B.~Lucas, J.~O.~Thostenson,
+  H.~E.~Hoekstra, and D.~M.~Boyer,
+  ``A collection of non-human primate computed tomography scans housed
+  in MorphoSource, a repository for 3D data,''
+  \emph{Scientific Data} {\bf 3}, 160001 (2016).
+  \url{https://doi.org/10.1038/sdata.2016.1}.
+
+\bibitem{validate29} K.~G.~Schilling, Y.~Gao, I.~Stepniewska,
+  T.-L.~Wu, F.~Wang, B.~A.~Landman, J.~C.~Gore, L.~M.~Chen, and
+  A.~W.~Anderson,
+  ``The VALiDATe29 MRI Based Multi-Channel Atlas of the Squirrel
+  Monkey Brain,''
+  \emph{Neuroinformatics} {\bf 15}(4), 343--364 (2017).
+  \url{https://doi.org/10.1007/s12021-017-9334-0}. RRID:SCR\_015542.
+
+\bibitem{gao-2014} Y.~Gao, A.~Parvathaneni, S.~Schilling,
+  \emph{et al.},
+  ``A brain MRI atlas of the common squirrel monkey,
+  \emph{Saimiri sciureus},''
+  \emph{Proc.\ SPIE Medical Imaging} {\bf 9038}, 90380C (2014).
+  \url{https://doi.org/10.1117/12.2043669}.
+
+\bibitem{aubry-2003} J.-F.~Aubry, M.~Tanter, M.~Pernot,
+  J.-L.~Thomas, and M.~Fink,
+  ``Experimental demonstration of noninvasive transskull adaptive
+  focusing based on prior computed tomography scans,''
+  \emph{J.\ Acoust.\ Soc.\ Am.} {\bf 113}(1), 84--93 (2003).
+  \url{https://doi.org/10.1121/1.1529663}.
+
+\bibitem{pinton-2012} G.~Pinton, J.-F.~Aubry, E.~Bossy, M.~Muller,
+  M.~Pernot, and M.~Tanter,
+  ``Attenuation, scattering, and absorption of ultrasound in the skull
+  bone,''
+  \emph{Medical Physics} {\bf 39}(1), 299--307 (2012).
+  \url{https://doi.org/10.1118/1.3668316}.
+
+\bibitem{pichardo-2011} S.~Pichardo, V.~W.~Sin, and K.~Hynynen,
+  ``Multi-frequency characterization of the speed of sound and
+  attenuation coefficient for longitudinal transmission of freshly
+  excised human skulls,''
+  \emph{Phys.\ Med.\ Biol.} {\bf 56}(1), 219--250 (2011).
+  \url{https://doi.org/10.1088/0031-9155/56/1/014}.
+
+\bibitem{tuba-mouse} G.~F.~Pinton,
+  ``Migrating the 15\,MHz transcranial mouse pipeline from
+  DigiMouse to the Maga (UW) 4K microCT,''
+  TUBA validation report, \texttt{docs/mouse/manuscript.pdf}.
+
+\bibitem{tuba-macaque} G.~F.~Pinton,
+  ``A 500\,kHz transcranial focused-ultrasound pipeline for the
+  rhesus macaque dorsal anterior cingulate cortex,''
+  TUBA validation report, \texttt{docs/macaque/manuscript.pdf}.
+
+\bibitem{tuba-rat} G.~F.~Pinton,
+  ``A transcranial focused-ultrasound pipeline for the rat:
+  DigiMorph dry-skull microCT registered to the Waxholm Space
+  SD brain atlas v4.01,''
+  TUBA validation report, \texttt{docs/rat/manuscript.pdf}.
+
+\end{thebibliography}
+
+\end{document}
