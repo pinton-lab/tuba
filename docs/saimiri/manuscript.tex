@@ -1,6 +1,8 @@
-% Saimiri sciureus museum-microCT + VALiDATe29 squirrel-monkey brain atlas.
-% Geometry-only pillar (deliverables 1-2); no colony CT staged yet, so the
-% quantitative acoustics are guarded, not measured. Build:
+% Saimiri museum-microCT (USNM 194346) + VALiDATe29 squirrel-monkey brain
+% atlas. Geometry-only pillar (deliverables 1-2): the museum skull and the
+% atlas are both staged and the geometry is measured end-to-end; the
+% quantitative acoustics stay guarded (no HU-calibrated colony CT). Build:
+%   python docs/saimiri/make_figures.py   # regenerate figures from the cache
 %   pdflatex manuscript
 %   pdflatex manuscript
 
@@ -22,7 +24,6 @@
 \providecommand{\br}{\toprule}
 \providecommand{\mr}{\midrule}
 \providecommand{\TODO}[1]{\textcolor{red!75!black}{\textbf{[TODO]} #1}}
-\providecommand{\PENDING}[1]{\textcolor{orange!70!black}{\textbf{[pending staged scan]} #1}}
 
 \begin{document}
 \justifying
@@ -57,15 +58,20 @@ cortex. This report covers \textbf{deliverables 1--2 (the geometry
 stages)} and is scoped, by design decision, to a \emph{geometry-only}
 build: no HU-calibrated colony CT is available yet, so the pillar is
 bootstrapped on an \emph{uncalibrated} museum microCT
-(\emph{Saimiri sciureus} USNM~338948, UT~Austin / DigiMorph,
-0.1189\,mm isotropic) registered to the VALiDATe29 multi-channel MRI
+(squirrel monkey \emph{Saimiri sp.}, NMNH USNM~194346, MorphoSource
+media 000116521, UTCT; 490 slices, 0.0977\,mm in-plane $\times$
+0.1189\,mm slice) registered to the VALiDATe29 multi-channel MRI
 atlas of the squirrel-monkey brain (Schilling \emph{et al.}\ 2017;
-29 animals, histologically-defined cortical labels). The atlas is
-staged and validated here ($212^3$ at 0.3\,mm; its cortical
-parcellation is confirmed to be \emph{region-level} --- S1 = anterior
-parietal cortex, M1 = primary motor cortex, l/r separate); only the
-museum skull remains to be staged, so the cavity/registration outputs
-are the pending items. The pillar reuses
+29 animals, histologically-defined cortical labels). \textbf{Both the
+skull and the atlas are staged and the geometry is now measured
+end-to-end}: the anisotropic microCT is isotropised to 0.0977\,mm, its
+orientation is confirmed clean RAS, a \emph{solid} endocranial cavity is
+extracted (15.9\,mL), and the \texttt{cavity\_binary} SyN to the atlas
+brain mask fits to Dice~0.96, warping the region-level labels
+(confirmed \emph{region-level} --- S1 = anterior parietal cortex,
+M1 = primary motor cortex, l/r separate) back to subject-space S1/M1
+targets that are anatomically correct (M1 rostral and dorsal to S1,
+4.5\,mm apart). The pillar reuses
 TUBA's core primitives from the mouse/rat/macaque pillars almost
 unchanged --- bone-shell cavity extraction
 (\texttt{tuba.core.cavity.bone\_shell\_cavity}), \texttt{cavity\_binary}
@@ -81,11 +87,12 @@ explicitly-flagged placeholder ramp is the sanctioned geometry-only
 fallback. Deliverable~1 also reports the points-per-wavelength (PPW)
 budget across the 2--4\,MHz operating band on the simulation grid, and
 a grid-convergence run of the transcranial time-of-flight aberration
-(the scalar a time-reversal correction must undo). All constants that
-can only be fixed against the \emph{staged} scan (orientation flips,
-intensity thresholds, cavity hull geometry) are marked
-\texttt{PROVISIONAL}; quantitative cavity/registration results and QC
-figures are produced by the end-to-end driver once the scan is staged.
+(the scalar a time-reversal correction must undo), which converges to
+0.24\,\% between $60$ and $30\,\mu$m. The scan-dependent constants
+(orientation flips, intensity thresholds, cavity hull geometry) are now
+\emph{calibrated} against the staged scan, and the cavity, registration,
+target, and placement outputs and their QC figures are produced by the
+end-to-end driver.
 The downstream wave physics (deliverables 3--7: time-reversal,
 multifocal synthesis, the two-foci feasibility sweep, MI/bioheat
 safety, and the per-animal export artifact) is out of scope for this
@@ -99,16 +106,16 @@ data manifest + fetchers at \texttt{src/tuba/data/}.
 \section{Scope and status}
 \label{sec:scope}
 
-This is a \emph{design and setup} report, not a validation report: the
-four prior TUBA pillars (mouse, macaque, human, rat) each document a
-pipeline calibrated end-to-end against a staged scan with measured
-cavity volumes, centroids, and focal figures. The squirrel-monkey
-pillar is at an earlier stage by deliberate choice --- the funded
-project targets a Vanderbilt colony, whose HU-calibrated CT is not yet
-in hand, so we build and verify the \emph{machinery} on a public museum
-microCT for geometry, gating the acoustics behind a calibration guard
-(\S\ref{sec:acoustic}) so nothing downstream mistakes an uncalibrated
-skull for a quantitative one. Two decisions frame the branch:
+Like the four prior TUBA pillars (mouse, macaque, human, rat), this one
+is now calibrated end-to-end against a staged scan --- with a measured
+cavity volume, a fitted registration, and subject-space targets --- but
+with one deliberate boundary: the acoustics are \emph{geometry-only}.
+The funded project targets a Vanderbilt colony whose HU-calibrated CT is
+not yet in hand, so we build and verify the full geometry on a public
+museum microCT and gate the quantitative acoustics behind a calibration
+guard (\S\ref{sec:acoustic}) so nothing downstream mistakes an
+uncalibrated skull for a quantitative one. Two decisions frame the
+branch:
 \begin{enumerate}[leftmargin=*]
 \setlength\itemsep{0pt}
   \item \textbf{Subject data:} a public museum microCT
@@ -119,44 +126,61 @@ skull for a quantitative one. Two decisions frame the branch:
         (the wave-solver study) are out of scope here and live in the
         \texttt{fullwave2-*} siblings (\S\ref{sec:scope-out}).
 \end{enumerate}
-Where a quantity can only be measured on the staged scan we write
-\PENDING{} rather than a fabricated number.
+Both the museum skull (\S\ref{sec:source}) and the VALiDATe29 atlas
+(\S\ref{sec:atlas}) are staged; all geometry numbers below are measured
+from them.
 
 % =============================================================================
 \section{Source data}
 \label{sec:source}
 
-\paragraph{Skull.} The skull volume is a microCT scan of a
-\emph{Saimiri sciureus} cranium, museum specimen USNM~338948 (National
-Museum of Natural History), scanned at the University of Texas
-High-Resolution X-ray CT Facility (UTCT) and distributed on
-DigiMorph~\cite{digimorph-saimiri}. The reconstruction is 540 axial
-slices at 0.1189\,mm isotropic over a 54.0\,mm field of reconstruction
---- a dry cranium, no soft tissue. The same openVertebrate / oUTCT
-specimens are mirrored on MorphoSource, the collection the TUBA macaque
+\paragraph{Skull.} The skull volume is a microCT scan of a squirrel
+monkey (\emph{Saimiri sp.}) cranium, museum specimen USNM~194346
+(National Museum of Natural History), scanned at the University of Texas
+High-Resolution X-ray CT Facility (UTCT, ACTIS scanner) and distributed
+as MorphoSource media 000116521~\cite{morphosource-saimiri} (also on
+DigiMorph~\cite{digimorph-saimiri}). The reconstruction is 490 axial
+slices, $504\times422$\,px, 16-bit, \emph{anisotropic} at 0.0977\,mm
+in-plane $\times$ 0.1189\,mm slice --- a dry cranium, no soft tissue.
+Part of the openVertebrate / oUTCT collection the TUBA macaque
 pillar~\cite{tuba-macaque} also draws from (Copes \emph{et
-al.}\ 2016~\cite{copes-2016}). Table~\ref{tab:scan-params} summarises
-the parameters.
+al.}\ 2016~\cite{copes-2016}). The MorphoSource record's taxonomy is
+internally inconsistent (catalogue field \emph{S.~boliviensis};
+Rossie's scan description \emph{S.~sciureus sciureus}, male) --- genus
+\emph{Saimiri} either way. Table~\ref{tab:scan-params} summarises the
+parameters.
 
 \begin{table}[H]
 \centering
-\caption{Saimiri sciureus USNM~338948 scan parameters (DigiMorph
-         specimen page). The intensity axis is \emph{uncalibrated}
-         (no HU phantom in the field of view).}
+\caption{Saimiri USNM~194346 (MorphoSource media 000116521) scan
+         parameters, from the media manifest. The intensity axis is
+         \emph{uncalibrated} (no HU phantom in the field of view).}
 \label{tab:scan-params}
 \small
 \begin{tabular}{ll}
 \br
-Specimen & \emph{Saimiri sciureus}, USNM~338948 (NMNH) \\
-Facility & UT Austin High-Resolution X-ray CT (UTCT) \\
-Slices & 540 axial \\
-Voxel & 0.1189\,mm isotropic \\
-Field of reconstruction & 54.0\,mm \\
-Calvarium thickness & 1.0--1.5\,mm ($\sim$8--13 voxels) \\
-Intensity & uncalibrated reconstruction counts \\
+Specimen & \emph{Saimiri sp.}, USNM~194346 (NMNH) \\
+MorphoSource media & 000116521 (ark:/87602/m4/M116521) \\
+Facility & UT Austin High-Resolution X-ray CT (UTCT ACTIS) \\
+Slices & 490 axial, $504\times422$\,px, 16-bit \\
+Voxel & 0.0977\,mm in-plane $\times$ 0.1189\,mm slice (anisotropic) \\
+Working pitch & 0.0977\,mm isotropic (slice axis up-sampled) \\
+Calvarium thickness & 1.0--1.5\,mm ($\sim$10--15 voxels) \\
+Intensity & uncalibrated 16-bit reconstruction counts \\
 \mr
 \end{tabular}
 \end{table}
+
+\paragraph{Anisotropy $\to$ isotropic working cache.}
+The shared cavity/align/slab tools (calibrated on the isotropic
+rat/mouse museum scans) assume isotropic voxels, so
+\texttt{downsample\_to\_working} isotropises the staged stack: it
+reformats to RAS at the in-plane pitch with the shared TIFF streamer,
+then up-samples \emph{only} the coarse slice axis
+(0.1189$\to$0.0977\,mm, order-1) to a 0.0977\,mm isotropic cache.
+Up-sampling (never down-sampling) that axis cannot erode the thin
+cortical-bone shell, and the whole downstream isotropic pipeline is then
+exact, with no change to the shared code.
 
 \paragraph{Uncalibrated intensity --- the central caveat.}
 Museum microCT carries no hydroxyapatite/HU phantom, so voxel values
@@ -177,10 +201,10 @@ at 4\,MHz: $\lambda_{\min} = c_{\text{water}}/f = 1500/4\times10^{6} =
 wavelength there, so the simulation grid pitch is set to
 $\Delta x = 60\,\mu$m (\texttt{SIM\_DX\_M} in
 \texttt{tuba.species.saimiri}); the resulting PPW budget is
-Table~\ref{tab:ppw}. Note the 0.1189\,mm microCT is \emph{coarser}
-than the $60\,\mu$m sim grid, so the skull is up-sampled onto the sim
-grid by the slab sampler (\S\ref{sec:placement}) --- the geometry is
-faithful; only the absolute acoustics are placeholder.
+Table~\ref{tab:ppw}. Note the 0.0977\,mm microCT working cache is
+\emph{coarser} than the $60\,\mu$m sim grid, so the skull is up-sampled
+onto the sim grid by the slab sampler (\S\ref{sec:placement}) --- the
+geometry is faithful; only the absolute acoustics are placeholder.
 
 \begin{table}[H]
 \centering
@@ -359,7 +383,11 @@ transcranial \emph{time-of-flight aberration}
 the phase-insertion delay that a time-reversal / phase-conjugation
 correction must undo, computed along the central beam ray at
 $\Delta x$ and $\Delta x/2$ and reported as an absolute and relative
-change. This is a convergence of the acoustic-\emph{property} model
+change. On the staged skull, along the beam to the M1 target, this
+gives $\tau = -630.2$\,ns at $60\,\mu$m and $-631.7$\,ns at $30\,\mu$m
+--- a $1.5$\,ns ($0.24\,\%$) change, i.e.\ the property model is
+converged at the sim pitch. This is a convergence of the
+acoustic-\emph{property} model
 with voxel pitch, not of a full-wave solve (which lives in the solver
 siblings, \S\ref{sec:scope-out}); it is exactly the quantity the
 downstream aberration correction consumes, so it is the right
@@ -373,33 +401,60 @@ as $\Delta x \to 0$).
 \label{sec:geometry}
 
 The geometry stages reuse the rat/macaque dry-skull spine with no
-algorithmic change; only the species constants differ, and the ones
-that depend on the scan are \texttt{PROVISIONAL} until it is staged.
+algorithmic change; only the species constants differ, and they are now
+calibrated against the staged scan. Figure~\ref{fig:geometry} shows the
+result.
 
-\paragraph{Ingest + orientation (PROVISIONAL).}
-The DigiMorph TIFF stack carries no DICOM affine; as in the rat
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{saimiri_geometry.png}
+\caption{Saimiri USNM~194346 microCT (97.7\,$\mu$m isotropic working
+         cache) with the extracted \emph{solid} endocranial cavity
+         (red, 15.9\,mL) through the cavity centroid. Sagittal, coronal,
+         and axial. The cavity fills the braincase from the frontal to
+         the occipital pole and the cerebellar fossa, follows the inner
+         table, is bilaterally symmetric, and excludes the orbits ---
+         the shape the registration needs. Uncalibrated intensity
+         (geometry only). Generated by
+         \texttt{docs/saimiri/make\_figures.py} from the build cache.}
+\label{fig:geometry}
+\end{figure}
+
+\paragraph{Ingest + orientation (confirmed).}
+The MorphoSource TIFF stack carries no DICOM affine; as in the rat
 pillar~\cite{tuba-rat} the storage$\to$anatomy mapping is fixed by an
-orientation probe (per-slice bone-mass profile + mid-stack
-orthoslices). The defaults in \texttt{tuba.species.saimiri}
+orientation probe (mid-stack orthoslices). The rat/macaque museum-CT
+defaults in \texttt{tuba.species.saimiri}
 (\texttt{SWAP\_ROW\_COL=True}, \texttt{VOXEL\_SIGNS}$=(-1,-1,+1)$,
-storage $(\text{slice}{=}AP,\text{row}{=}DV,\text{col}{=}LR)$) follow
-the macaque/rat museum-CT convention and are \emph{provisional} pending
-that probe. At 0.1189\,mm the scan is already near the rat working-cache
-pitch, so a factor-1 reformat to RAS is used rather than a block-max
-downsample.
+storage $(\text{slice}{=}AP,\text{row}{=}DV,\text{col}{=}LR)$) transfer
+correctly to this UTCT stack: the probe confirms a clean RAS frame ---
+anterior (snout, orbits) at $+y$, dorsal (braincase vault) at $+z$,
+bilaterally symmetric about $x$, right-handed --- with no residual tilt
+(align angles $0^\circ$, as in rat). True L/R handedness is not
+recoverable from a bare museum skull (no fiducial); $+x$ is taken as
+Right per RAS and the hemisphere labels carry that caveat.
 
-\paragraph{Endocranial cavity (PROVISIONAL).}
-Squirrel-monkey whole-brain volume is $\sim$22\,mL, so the cavity
-target is $\sim$20--28\,mL; the many dry-cranial openings (orbits,
-foramen magnum) rule out the mouse-style pure-hysteresis extractor for
-the same reason they do in rat and macaque. We therefore use the
-species-agnostic bone-shell extractor
+\paragraph{Endocranial cavity (measured, solid).}
+The many dry-cranial openings (orbits, optic canals, foramen magnum)
+rule out the mouse-style pure-hysteresis extractor, exactly as in rat
+and macaque, so we use the species-agnostic bone-shell extractor
 \texttt{tuba.core.cavity.\allowbreak bone\_shell\_cavity} (per-column
-basicranium floor + per-row plugs + per-axial hull), with hull
-half-extents interpolated between the rat ($\sim$2\,mL) and macaque
-($\sim$90\,mL) pillars (\texttt{HULL\_X\_HALF\_MM}$=18$, etc.). The
-produced volume is checked against the 20--28\,mL target at run time
-and flagged if outside; the measured value is \PENDING{}.
+basicranium floor + per-row plugs + per-axial hull), with a
+squirrel-scale hull envelope (\texttt{HULL\_X\_HALF\_MM}$=24$, tighter
+rostral cutoff at the basicranium than the vault). One calibration point
+was specific to this scan and mirrors how the rat's naturally-watertight
+8-bit base behaves: at the histogram bone knee ($\sim$6000 counts) the
+thin \emph{midline} basicranium drops below threshold, the per-column
+floor fails to seal it, and ``outside'' floods up the midline into the
+braincase centre (a hollow-centred cavity). Dropping the cavity shell
+threshold to a watertight $5000$ counts (\texttt{CAVITY\_BONE\_LOW},
+below the bone knee kept for the ramp/centroid) seals the floor and
+yields a \emph{solid} cavity (central-fill $0.97$ vs $0.26$), verified
+by a fill-holes check. The extracted volume is $15.9$\,mL --- a
+conservative, inner-table-inclusive figure within the $\sim$16--26\,mL
+comparative range for \emph{Saimiri}; because the cavity is only the
+registration moving image, the affine to the $33$\,mL atlas brain mask
+absorbs the individual scale difference.
 
 \paragraph{Registration --- \texttt{cavity\_binary} SyN
 (affine\,+\,deformable).}
@@ -415,20 +470,58 @@ through the saved inverse transforms
 nearest-neighbour for the labels). Unlike the rat and mouse pillars,
 which \emph{derive} a brain mask from the annotation, VALiDATe29 ships
 its own (\texttt{VALiDATe-brainmask}), so the binding uses it directly
-as the SyN fixed image --- no derive step and no ANTs for the mask.
+as the SyN fixed image --- no derive step and no ANTs for the mask. On
+the staged scan the SyN converges in ${\sim}1$\,min; the fit is
+excellent --- the atlas brain mask, warped back into subject space,
+overlaps the extracted cavity at \textbf{Dice~0.962}
+(15.9 vs 16.2\,mL) and fills the braincase following the inner table
+(Fig.~\ref{fig:qc}).
 
 \paragraph{Target export + QC (deliverable 2 outputs).}
 \texttt{export\_targets()} writes the S1 (anterior parietal cortex) and
 M1 (primary motor cortex) coordinates in the subject simulation frame to
-\texttt{saimiri\_targets.json}, alongside the transform prefix, and
-\texttt{qc\_figure()} writes the three-panel orthoslice overlay
-(bone shell, warped VALiDATe29 brain mask, S1/M1 markers). The
-transform is saved under \texttt{\$TUBA\_SAIMIRI\_REG\_DIR} with prefix
-\texttt{saimiri\_cavity\_to\_validate29}. The target$\to$label mapping
-and the \emph{atlas-space} centroids (Table~\ref{tab:targets}) are
-already confirmed against the staged atlas; only the \emph{subject-space}
-coordinates and the QC figure remain \PENDING{} the museum skull, since
-they are the warp of these labels through the cavity registration.
+\texttt{saimiri\_targets.json}, alongside the transform prefix (saved
+under \texttt{\$TUBA\_SAIMIRI\_REG\_DIR} as
+\texttt{saimiri\_cavity\_to\_validate29}), and \texttt{qc\_figure()}
+writes the three-panel overlay of Figure~\ref{fig:qc}. The subject-space
+left-hemisphere centroids (Table~\ref{tab:subject-targets}) are
+anatomically correct: \textbf{M1 sits $3.7$\,mm rostral and $1.2$\,mm
+dorsal to S1}, $4.5$\,mm centroid-to-centroid, both in the left
+hemisphere --- the sensorimotor topology the study depends on, carried
+through the cavity registration from the confirmed atlas-space labels
+(Table~\ref{tab:targets}).
+
+\begin{table}[H]
+\centering
+\caption{Study-target centroids in the \emph{subject} aligned-native RAS
+         frame (left hemisphere), from \texttt{saimiri\_targets.json}
+         --- the atlas labels of Table~\ref{tab:targets} warped through
+         the cavity SyN. Volumes scale with the cavity/atlas affine.}
+\label{tab:subject-targets}
+\small
+\begin{tabular}{llrr}
+\br
+Target & Atlas label (id) & subject centroid $(x,y,z)$ & mL \\
+\mr
+S1 & anterior\_parietal\_cortex (11) & $(-8.6,\,-4.1,\,14.3)$ & 0.23 \\
+M1 & primary\_motor\_cortex (3)      & $(-6.2,\,-0.5,\,15.5)$ & 0.15 \\
+\mr
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{saimiri_atlas_in_skull.png}
+\caption{Deliverable-2 QC: VALiDATe29 atlas registered into the Saimiri
+         USNM~194346 skull. Bone shell (gray), the warped VALiDATe29
+         brain mask (cyan) filling the braincase, and the S1/M1 target
+         markers, in sagittal, coronal, and axial. M1 lies rostral and
+         dorsal to S1 in the left hemisphere across all three planes.
+         Cavity vs warped-brain Dice $=0.96$. Generated by
+         \texttt{docs/saimiri/make\_figures.py} /
+         \texttt{tuba.species.saimiri.qc\_figure}.}
+\label{fig:qc}
+\end{figure}
 
 % =============================================================================
 \section{Placement and slab export}
@@ -438,11 +531,15 @@ they are the warp of these labels through the cavity registration.
 focused bowl aimed at a study target, and \texttt{load\_slab} returns
 $(c,\rho,dz_{\text{slab}},\text{frame})$ with the \emph{same signature}
 as the mouse/rat/macaque loaders, so any FDTD or angular-spectrum
-driver wired against one species runs on this one unchanged. The slab
-ramp is the flagged placeholder (\S\ref{sec:acoustic}); the cavity is
-overwritten with brain-parenchymal properties ($c=1540$\,m/s,
-$\rho=1040$\,kg/m$^3$) exactly as in the other pillars. This slab is
-the hand-off boundary to the wave-solver siblings.
+driver wired against one species runs on this one unchanged. On the
+staged skull, aiming at the M1 target, it lands the bowl apex on the
+outer-bone surface, lifts it $11.2$\,mm for scalp clearance, and returns
+a $20$\,mm apex-to-target standoff with the beam axis
+$\hat{\bm n}=(-0.12,\,0.09,\,-0.99)$ (near-vertical, entering the dorsal
+vault). The slab ramp is the flagged placeholder (\S\ref{sec:acoustic});
+the cavity is overwritten with brain-parenchymal properties
+($c=1540$\,m/s, $\rho=1040$\,kg/m$^3$) exactly as in the other pillars.
+This slab is the hand-off boundary to the wave-solver siblings.
 
 % =============================================================================
 \section{Out of scope here: the wave-physics study (deliverables 3--7)}
@@ -480,12 +577,13 @@ and D5 will build on.
 \section{Verification}
 \label{sec:tests}
 
-Because no \emph{skull} is staged, verification is by offline unit tests
-(\texttt{tests/test\_saimiri.py}, 11 tests, no network / no antspyx /
-no data) --- plus a live check of the atlas binding against the staged
-VALiDATe29 (keyword resolution, hemisphere-aware label lookup, shipped
-brain mask, and the target centroids of Table~\ref{tab:targets}). The
-offline tests cover the logic that must hold regardless:
+Verification is at two levels: (i) the end-to-end build now runs on the
+staged skull + atlas (\texttt{python -m tuba.species.saimiri build}),
+producing the cavity, registration (Dice~0.96), subject-space targets,
+QC figure, placement, and D1 report of this document; and (ii) offline
+unit tests (\texttt{tests/test\_saimiri.py}, 11 tests, no network /
+no antspyx / no data) that pin the logic which must hold regardless of a
+scan:
 \begin{itemize}[leftmargin=*]
 \setlength\itemsep{0pt}
   \item importing the pillar stays ANTs-free (ANTs is lazy inside
@@ -504,51 +602,54 @@ offline tests cover the logic that must hold regardless:
   \item the data manifest carries the three Saimiri entries with the
         expected calibration/license semantics.
 \end{itemize}
-The full repository suite is 42 passing (31 prior + 11 new); \texttt{ruff}
-is clean.
+The full repository suite is 41 passing + 1 skipped; \texttt{ruff} is
+clean.
 
 % =============================================================================
 \section{Open items}
 \label{sec:open}
 
-The atlas half is staged and validated (\S\ref{sec:atlas},
-Fig.~\ref{fig:atlas}, Table~\ref{tab:targets}); the remaining items
-require the museum skull (and, for quantitative acoustics, an
-HU-calibrated colony CT):
+The geometry is now staged and validated end-to-end (skull:
+\S\ref{sec:geometry}, Figs.~\ref{fig:geometry}--\ref{fig:qc}; atlas:
+\S\ref{sec:atlas}, Fig.~\ref{fig:atlas}). The remaining items are the
+acoustic calibration and the downstream study:
 \begin{enumerate}[leftmargin=*]
 \setlength\itemsep{0pt}
-  \item Stage the museum microCT (\texttt{python -m
-        tuba.data.fetch\_saimiri} --- interactive request/login), then
-        run \texttt{python -m tuba.species.saimiri build}. The
-        VALiDATe29 atlas fetch is already verified end-to-end.
-  \item Calibrate the \texttt{PROVISIONAL} constants (orientation
-        flips, intensity thresholds, cavity hull) against the staged
-        scan via the orientation/histogram probe, exactly as the rat
-        pillar~\cite{tuba-rat} documents; report the measured cavity
-        volume against the 20--28\,mL target and produce the cavity +
-        registration QC figures, and warp Table~\ref{tab:targets} into
-        subject space.
-  \item Add the stereotaxic hand-sub-representation prior within
-        anterior parietal cortex (the label granularity limit of
-        \S\ref{sec:atlas}); the region$\to$label mapping itself is now
-        confirmed and pinned.
-  \item When a Vanderbilt colony CT is available, set
-        \texttt{CT\_CALIBRATION} to an \texttt{hu} calibration to
-        unlock the quantitative Aubry mapping, and run the
-        grid-convergence with the real property field.
-  \item Hand the exported slab + targets to the \texttt{fullwave2-*}
-        siblings for deliverables 3--7 (\S\ref{sec:scope-out}).
+  \item \textbf{Quantitative acoustics.} When a Vanderbilt colony CT is
+        available, set \texttt{CT\_CALIBRATION} to an \texttt{hu}
+        calibration to unlock the quantitative Aubry mapping (one line),
+        and re-run the grid-convergence with the real property field.
+        Until then the acoustics stay guarded and the slab ramp is the
+        flagged placeholder.
+  \item \textbf{Hand sub-representation.} Add a stereotaxic
+        hand-knob prior within anterior parietal cortex (the label
+        granularity limit of \S\ref{sec:atlas}) to resolve areas 3b/1
+        from the bundled APC label; the region$\to$label mapping itself
+        is confirmed and pinned.
+  \item \textbf{L/R handedness.} A museum skull carries no L/R fiducial;
+        confirm the hemisphere convention against a colony CT with known
+        laterality before per-animal targeting.
+  \item \textbf{Downstream study.} Hand the exported slab + targets to
+        the \texttt{fullwave2-*} siblings for deliverables 3--7
+        (\S\ref{sec:scope-out}).
 \end{enumerate}
 
 % =============================================================================
 \begin{thebibliography}{99}
 
+\bibitem{morphosource-saimiri} J.~Rossie (data), NMNH Division of
+  Mammals (specimen),
+  ``Skull [CTImageSeries] --- \emph{Saimiri}, USNM~194346,''
+  MorphoSource media 000116521, ark:/87602/m4/M116521, UT Austin
+  High-Resolution X-ray CT Facility (staged 2026-08-20).
+  \url{https://www.morphosource.org/concern/media/000116521}.
+
 \bibitem{digimorph-saimiri} J.~Rossie,
-  ``\emph{Saimiri sciureus} (On-line), USNM~338948,''
+  ``\emph{Saimiri sciureus} (On-line), USNM~194346,''
   Digital Morphology Library (DigiMorph), University of Texas
-  High-Resolution X-ray CT Facility, 2002.
-  \url{https://digimorph.org/specimens/Saimiri_sciureus/338948/}
-  (accessed 2026-08-18).
+  High-Resolution X-ray CT Facility.
+  \url{https://digimorph.org/specimens/Saimiri_sciureus/194346/}
+  (accessed 2026-08-20).
 
 \bibitem{copes-2016} L.~E.~Copes, L.~A.~B.~Lucas, J.~O.~Thostenson,
   H.~E.~Hoekstra, and D.~M.~Boyer,

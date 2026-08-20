@@ -1,17 +1,20 @@
 """Stage a Saimiri sciureus (common squirrel monkey) dry-skull microCT
 for the geometry-only pillar.
 
-Reference specimen
-------------------
-USNM 338948 (Saimiri sciureus), National Museum of Natural History,
+Reference specimen (STAGED)
+---------------------------
+NMNH USNM 194346 (squirrel monkey, *Saimiri sp.*), MorphoSource media
+000116521 ("Skull [CTImageSeries] [Etc]", ark:/87602/m4/M116521),
 scanned at the University of Texas High-Resolution X-ray CT Facility
-(UTCT) and published on DigiMorph (Rossie, J., 2002,
-https://digimorph.org/specimens/Saimiri_sciureus/338948/): 540 slices,
-0.1189 mm isotropic, 54.0 mm field of reconstruction. The same
-openVertebrate / oUTCT specimens are mirrored on MorphoSource (e.g.
-media 000039292, "Skull & Mandible [CTImageSeries]"), the collection
-this project's macaque pillar also draws from (Copes et al. 2016,
-*Sci. Data* 3:160001, doi:10.1038/sdata.2016.1).
+(UTCT, ACTIS scanner) and also on DigiMorph (Rossie, J.,
+https://digimorph.org/specimens/Saimiri_sciureus/194346/): 490 16-bit
+TIFF slices, 504x422 px, ANISOTROPIC 0.0977 mm in-plane x 0.1189 mm
+slice. The MorphoSource record's taxonomy is internally inconsistent
+(physical_object_taxonomy_name 'Saimiri boliviensis'; Rossie's scan
+description 'Saimiri sciureus sciureus, USNM 194346, male') -- genus
+Saimiri either way. Part of the openVertebrate / oUTCT collection the
+macaque pillar also draws from (Copes et al. 2016, *Sci. Data*
+3:160001, doi:10.1038/sdata.2016.1).
 
 **Uncalibrated.** Museum microCT carries no HU phantom, so voxel values
 are arbitrary reconstruction counts. This pillar therefore uses the
@@ -45,12 +48,15 @@ DEST = os.environ.get(
     os.path.expanduser('~/.cache/tuba/saimiri/source'),
 )
 
-DIGIMORPH_URL = 'https://digimorph.org/specimens/Saimiri_sciureus/338948/'
+DIGIMORPH_URL = 'https://digimorph.org/specimens/Saimiri_sciureus/194346/'
+MORPHOSOURCE_MEDIA = 'https://www.morphosource.org/concern/media/000116521'
 MORPHOSOURCE_SEARCH = (
-    'https://www.morphosource.org/catalog/media?q=Saimiri+sciureus'
+    'https://www.morphosource.org/catalog/media?q=Saimiri'
     '&f%5Bhuman_readable_media_type_sim%5D%5B%5D=CT+Image+Series')
-VOXEL_MM = 0.1189           # DigiMorph USNM 338948 reconstructed pitch
-APPROX_SLICES = 540
+VOXEL_INPLANE_MM = 0.0977   # media 000116521 x/y pixel spacing
+VOXEL_SLICE_MM = 0.1189     # media 000116521 z spacing (slice thickness)
+VOXEL_MM = VOXEL_INPLANE_MM  # in-plane reconstruction pitch
+APPROX_SLICES = 490
 
 
 def _is_zip(p):
@@ -88,8 +94,10 @@ def _unpack(arch, dest_dir):
 
 def main():
     os.makedirs(DEST, exist_ok=True)
-    print(f'Staging Saimiri sciureus dry-skull microCT into {DEST}')
-    print(f'  expected ~{VOXEL_MM} mm iso, ~{APPROX_SLICES} slices, dry skull '
+    print(f'Staging Saimiri dry-skull microCT (USNM 194346, media 000116521) '
+          f'into {DEST}')
+    print(f'  expected ~{APPROX_SLICES} slices, {VOXEL_INPLANE_MM} mm in-plane '
+          f'x {VOXEL_SLICE_MM} mm slice (anisotropic), dry skull '
           f'(GEOMETRY ONLY -- uncalibrated, no HU phantom)')
 
     archs = _candidate_archives(DEST)
@@ -101,11 +109,13 @@ def main():
         return 0
 
     print(f'\n  MISSING archive in {DEST}')
-    print('           1. open one of:')
-    print(f'                MorphoSource: {MORPHOSOURCE_SEARCH}')
-    print(f'                DigiMorph:    {DIGIMORPH_URL}')
-    print('           2. request/download the CT image series (TIFF stack)')
-    print('              for an adult Saimiri sciureus cranium (~0.12 mm iso)')
+    print('           1. open the reference specimen (free MorphoSource '
+          'account, per-record approval):')
+    print(f'                MorphoSource media: {MORPHOSOURCE_MEDIA}')
+    print(f'                DigiMorph:          {DIGIMORPH_URL}')
+    print(f'                (or search:         {MORPHOSOURCE_SEARCH} )')
+    print('           2. use the "Download" action to fetch the CT image '
+          'series (zip of the 16bit/ TIFF stack)')
     print(f'           3. save the archive into {DEST}/')
     print('           4. re-run this script to unpack')
     return 1

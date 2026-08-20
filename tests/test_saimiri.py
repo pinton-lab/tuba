@@ -236,7 +236,9 @@ def test_manifest_saimiri_entries():
     assert keys == {'saimiri.skull', 'saimiri.atlas_template',
                     'saimiri.atlas_annotation'}
     skull = get('saimiri.skull')
-    assert skull.voxel_size_mm == pytest.approx(0.1189)
+    # Staged USNM 194346 is anisotropic (0.0977 in-plane x 0.1189 slice);
+    # the manifest records the in-plane reconstruction pitch.
+    assert skull.voxel_size_mm == pytest.approx(0.0977)
     assert 'uncalibrated' in (skull.notes or '').lower()
     assert skull.fetcher_script == 'src/tuba/data/fetch_saimiri.py'
     atlas = get('saimiri.atlas_template')

@@ -4,8 +4,9 @@ species binding -- NIH R01 EB037345, Aim 3.
 Geometry-only pillar. Where the mouse/rat/macaque/human pillars each
 register a subject skull to a species brain atlas and then map intensity
 to acoustic properties, this pillar is bootstrapped on an **uncalibrated
-museum microCT** (Saimiri sciureus USNM 338948; see
-:mod:`tuba.data.fetch_saimiri`). It therefore does the geometry --
+museum microCT** (squirrel monkey *Saimiri sp.*, NMNH USNM 194346,
+MorphoSource media 000116521; see :mod:`tuba.data.fetch_saimiri`). It
+therefore does the geometry --
 skull segmentation, endocranial cavity, VALiDATe29 atlas registration,
 somatosensory/motor target export -- but the quantitative CT->acoustics
 step (:class:`tuba.core.hu_acoustics.AubryHUMapping`) **refuses to run**
@@ -42,14 +43,17 @@ Environment variables
 * ``VALIDATE29_DEST``        -- VALiDATe29 atlas root (mirrors
   :mod:`tuba.data.fetch_validate29`).
 
-PROVISIONAL constants
---------------------
-Orientation flips, intensity thresholds, and the cavity hull geometry
-below are marked ``PROVISIONAL``: like every other pillar they are fixed
-by an orientation/histogram probe on the *staged* scan (cf. the rat
-pillar's determination trail). They carry rat/macaque-scaled defaults so
-the pipeline is runnable the moment the scan lands, but must be
-re-confirmed against it before any result is trusted.
+Calibration state
+-----------------
+The orientation, intensity thresholds, and cavity hull geometry below
+are CALIBRATED against the staged scan (USNM 194346): the rat/macaque
+museum-CT orientation convention transfers correctly (confirmed clean
+RAS by an orthoslice probe), the bone/cavity thresholds are set from the
+histogram, and the hull envelope + watertight-shell threshold give a
+solid ~15.9 mL endocranial cavity. The cavity_binary SyN to the
+VALiDATe29 brain mask fits to Dice 0.96, and the warped S1/M1 targets
+are anatomically correct (M1 rostral+dorsal to S1). Only the acoustics
+stay guarded (no HU-calibrated colony CT). See docs/saimiri/manuscript.
 """
 from __future__ import annotations
 
@@ -59,7 +63,7 @@ import os
 import numpy as np
 
 from tuba.atlases.validate29 import VALiDATe29
-from tuba.core import (align, cavity as cav, downsample, hu_acoustics,
+from tuba.core import (align, cavity as cav, downsample, frame, hu_acoustics,
                        placement as plc, slab, surface, warp)
 
 # ---------------------------------------------------------------------------
@@ -73,13 +77,15 @@ SOURCE_DIR = os.environ.get(
     'SAIMIRI_SOURCE_DIR',
     os.path.expanduser('~/.cache/tuba/saimiri/source'))
 
-# DigiMorph/UTCT USNM 338948 unpacks to a TIFF stack; glob is permissive
-# because the museum archive layout is not fixed until it is staged.
+# MorphoSource/UTCT media 000116521 (USNM 194346) unpacks to a 16-bit
+# TIFF stack under 16bit/; glob is permissive because the museum archive
+# layout is not fixed until it is staged.
 TIFF_GLOB = os.path.join(SOURCE_DIR, '**', '*.tif*')
 
-# Cached intermediates (subject aligned-native RAS frame).
-SAIMIRI_RAS_NIFTI         = os.path.join(REG_DIR, 'saimiri_skull_119um.nii.gz')
-SAIMIRI_RAS_ALIGNED       = os.path.join(REG_DIR, 'saimiri_skull_aligned_119um.nii.gz')
+# Cached intermediates (subject aligned-native RAS frame, isotropised to
+# WORKING_VOXEL_MM). The staged scan is anisotropic; see downsample_to_working.
+SAIMIRI_RAS_NIFTI         = os.path.join(REG_DIR, 'saimiri_skull_98um.nii.gz')
+SAIMIRI_RAS_ALIGNED       = os.path.join(REG_DIR, 'saimiri_skull_aligned_98um.nii.gz')
 SAIMIRI_RAS_WORKING       = SAIMIRI_RAS_ALIGNED  # slab/surface source
 CAVITY_NII                = os.path.join(REG_DIR, 'saimiri_cranial_cavity.nii.gz')
 CAVITY_QC                 = os.path.join(REG_DIR, 'saimiri_cavity_qc.png')
@@ -97,12 +103,25 @@ SYN_PREFIX = 'saimiri_cavity_to_validate29'
 # ---------------------------------------------------------------------------
 # Physical parameters
 # ---------------------------------------------------------------------------
-NATIVE_VOXEL_MM = 0.1189      # USNM 338948 reconstructed pitch (DigiMorph)
-WORKING_VOXEL_MM = NATIVE_VOXEL_MM  # already ~119 um; no downsample needed
+# Staged scan is ANISOTROPIC: 0.0977 mm in-plane (x, y) x 0.1189 mm slice
+# (z), per the MorphoSource media 000116521 manifest (UTCT ACTIS recon of
+# USNM 194346). The shared cavity/align/slab tools assume isotropic voxels
+# (rat/mouse museum scans are), so downsample_to_working isotropises the
+# stack to WORKING_VOXEL_MM by upsampling only the coarse slice axis
+# (order-1, thin-bone-preserving) -- keeping the fine in-plane resolution.
+NATIVE_INPLANE_MM = 0.0977    # media 000116521 x/y pixel spacing
+NATIVE_SLICE_MM = 0.1189      # media 000116521 z spacing (slice thickness)
+NATIVE_VOXEL_MM = NATIVE_INPLANE_MM   # reformat pitch (in-plane, factor 1)
+WORKING_VOXEL_MM = NATIVE_INPLANE_MM  # isotropic working pitch (~98 um)
 
-# Storage-axis convention (PROVISIONAL). Defaulted to the macaque/rat
-# museum-CT convention (slice=AP, row=DV, col=LR); confirm with an
-# orientation probe (mid-stack orthoslices) on the staged scan.
+# Storage-axis convention (CONFIRMED on USNM 194346, media 000116521).
+# The DigiMorph/UTCT stack follows the same (slice=AP, row=DV, col=LR)
+# convention as the rat pillar; an orientation probe (mid-stack
+# orthoslices, saimiri_orient_probe) confirms the resulting frame is
+# clean RAS: anterior (snout/orbits) at +y, dorsal (braincase dome) at
+# +z, bilaterally symmetric about x, right-handed. True L/R handedness is
+# not recoverable from a bare museum skull (no fiducial); +x is taken as
+# Right per RAS and the L/R target labels carry that caveat.
 SLICE_FLIP = False
 ROW_FLIP = False
 COL_FLIP = True
@@ -111,12 +130,13 @@ AXIS_FLIP_KWARGS = {'slice_flip': SLICE_FLIP, 'row_flip': ROW_FLIP,
                     'col_flip': COL_FLIP, 'swap_row_col': SWAP_ROW_COL}
 VOXEL_SIGNS = (-1, -1, +1)    # storage (i=R, j=A, k=V) -> RAS world
 
-# Intensity thresholds (PROVISIONAL, uncalibrated counts). Set from the
-# staged scan's histogram (air / soft-tissue / cortical-bone modes) as in
-# the rat pillar. Defaults assume a 16-bit reconstruction.
-BONE_LOW = 8000.0             # shell-seed floor + placeholder-ramp i_low
-BONE_HIGH = 20000.0           # cavity-exclusion ceiling
-BONE_RAMP_HIGH = 32000.0      # placeholder-ramp cortical anchor (i_high)
+# Intensity thresholds (CONFIRMED from the staged-scan histogram, 16-bit
+# uncalibrated counts). Air/mount+soft-tissue mode is <=~5000 (p90=5267);
+# the bone knee is at ~6000 (voxel fraction 13.0% ->7.5% across 5-6k),
+# cortical bone runs to ~40k (p99.9=43k). See saimiri_orient_probe.
+BONE_LOW = 6000.0            # shell-seed floor + placeholder-ramp i_low
+BONE_HIGH = 18000.0          # cavity-exclusion ceiling
+BONE_RAMP_HIGH = 35000.0     # placeholder-ramp cortical anchor (i_high)
 
 # Pre-alignment rotation (PROVISIONAL). Museum stacks are near axis-aligned
 # after the swap+transpose; a PCA probe on the staged bone cloud fixes any
@@ -126,18 +146,39 @@ ALIGN_RY_DEG = 0.0
 ALIGN_RZ_DEG = 0.0
 NATIVE_PAD_VOXELS = 200
 
-# Cavity hull geometry (PROVISIONAL, squirrel-monkey scale). Squirrel
-# monkey whole-brain volume is ~22 mL; the endocranial cavity target is
-# ~20-28 mL. Hull half-extents interpolate between the rat (~2 mL) and
-# macaque (~90 mL) pillars.
+# Cavity extraction, using the shared macaque/rat bone-shell recipe
+# (tuba.core.cavity.bone_shell_cavity). Same pattern as every pillar: a
+# solid, correctly-shaped endocranial "seed" is the moving image for the
+# atlas-brain-mask registration; it need not be a perfect segmentation,
+# only solid and anatomically bounded.
+#
+# CAVITY_BONE_LOW (5000) is a WATERTIGHT-SHELL threshold, set *below* the
+# BONE_LOW air/bone knee (6000). Like the rat (whose 8-bit threshold-50
+# base is naturally watertight), the squirrel needs the thin midline
+# basicranium captured so the per-column floor seals it: at 6000 the
+# midline base drops below threshold and "outside" floods up into the
+# braincase centre (a hollow-centred cavity); at 5000 the floor is
+# watertight and the cavity is solid (verified: central-fill 0.97 vs
+# 0.26). The slightly thicker shell makes the volume a conservative,
+# inner-table-inclusive estimate. Confirmed on saimiri_cavity_solid.
+CAVITY_BONE_LOW = 5000.0
 SEED_CLOSE_MM = 1.5
 PLUG_SMOOTH_MM = 1.5
-HULL_X_HALF_MM = 18.0
-HULL_Y_MAX_LOWZ_MM = -3.0
-HULL_Y_MAX_HIGHZ_MM = +10.0
-HULL_Z_MIN_MM = -12.0
+# Generous braincase envelope (squirrel scale); confirmed non-clipping on
+# the staged scan (cavity extent x +-18, y [-27,+16], z [-10,+20] mm all
+# sit inside these planes). Rostral cutoff is tighter at the basicranium
+# (low z) than at the vault (high z), as in the rat/macaque pillars.
+HULL_X_HALF_MM = 24.0
+HULL_Y_MAX_LOWZ_MM = +8.0
+HULL_Y_MAX_HIGHZ_MM = +20.0
+HULL_Z_MIN_MM = -16.0
 HULL_Z_YCUTOFF_BREAK_MM = +1.0
-CAVITY_TARGET_ML = (20.0, 28.0)
+# Endocranial-cavity QC bracket. The solid extraction lands ~16 mL
+# (conservative, inner-table-inclusive); Saimiri cranial capacity in the
+# comparative literature spans ~16-26 mL across individuals/species. The
+# cavity is the registration moving image, so the affine to the 33 mL
+# VALiDATe29 brain mask absorbs the individual scale difference.
+CAVITY_TARGET_ML = (13.0, 22.0)
 
 # ---------------------------------------------------------------------------
 # Acoustic model (deliverable 1) -- calibration state + mappings.
@@ -201,17 +242,51 @@ def _assert_atlas_staged():
 # ---------------------------------------------------------------------------
 def downsample_to_working(force=False, verbose=True):
     """Reformat the native TIFF stack into an aligned-axes RAS NIfTI at
-    the working (~119 um) pitch. Factor-1 (the scan is already ~119 um):
-    applies axis flips + RAS affine only."""
-    return downsample.downsample_tiff_stack_to_nifti(
+    the working (~98 um) *isotropic* pitch.
+
+    The staged scan is anisotropic (0.0977 mm in-plane, 0.1189 mm slice).
+    We reuse the shared TIFF streamer at the in-plane pitch (factor 1,
+    no in-plane decimation), which -- after the fixed
+    ``apply_axis_flips`` transpose -- puts the coarse slice axis at
+    output axis 1 (world AP). A single order-1 zoom along that axis
+    upsamples it from 0.1189 to 0.0977 mm, yielding a truly isotropic
+    volume so the downstream isotropic-voxel tools (cavity, align, slab)
+    are exact. Upsampling (never downsampling) the slice axis cannot
+    erode the thin cortical-bone shell.
+    """
+    import nibabel as nib
+    import scipy.ndimage as sn
+
+    os.makedirs(REG_DIR, exist_ok=True)
+    if os.path.exists(SAIMIRI_RAS_NIFTI) and not force:
+        if verbose:
+            print(f'  using cached {SAIMIRI_RAS_NIFTI}')
+        return SAIMIRI_RAS_NIFTI
+
+    raw_path = os.path.join(REG_DIR, 'saimiri_skull_inplane_raw.nii.gz')
+    downsample.downsample_tiff_stack_to_nifti(
         _tiff_paths(),
-        target_voxel_mm=WORKING_VOXEL_MM,
-        native_voxel_mm=NATIVE_VOXEL_MM,
-        out_path=SAIMIRI_RAS_NIFTI,
+        target_voxel_mm=NATIVE_INPLANE_MM,
+        native_voxel_mm=NATIVE_INPLANE_MM,
+        out_path=raw_path,
         axis_flip_kwargs=AXIS_FLIP_KWARGS,
         voxel_signs=VOXEL_SIGNS,
         force=force, verbose=verbose,
     )
+
+    # Isotropise: the slice axis (output axis 1) is true 0.1189 mm but the
+    # reformat labelled it 0.0977; zoom it up so the physical spacing
+    # matches the label on every axis.
+    img = nib.load(raw_path)
+    vol = np.asarray(img.dataobj).astype(np.float32)
+    zoom_j = NATIVE_SLICE_MM / NATIVE_INPLANE_MM     # 1.217x along AP
+    iso = sn.zoom(vol, (1.0, zoom_j, 1.0), order=1)
+    affine = frame.affine_for_shape(iso.shape, WORKING_VOXEL_MM, signs=VOXEL_SIGNS)
+    nib.save(nib.Nifti1Image(iso.astype(np.float32), affine), SAIMIRI_RAS_NIFTI)
+    if verbose:
+        print(f'  isotropised slice axis {vol.shape} -> {iso.shape} '
+              f'@ {WORKING_VOXEL_MM*1e3:.1f} um iso -> {SAIMIRI_RAS_NIFTI}')
+    return SAIMIRI_RAS_NIFTI
 
 
 def align_skull_to_axes(force=False, verbose=True):
@@ -229,9 +304,12 @@ def align_skull_to_axes(force=False, verbose=True):
 # Stage 3: endocranial cavity (bone-shell recipe shared in tuba.core.cavity)
 # ---------------------------------------------------------------------------
 def extract_cavity(force=False, verbose=True):
-    """Extract the squirrel-monkey endocranial cavity as the moving image
-    for the cavity_binary SyN. Bone-shell seed (per-column floor + per-row
-    plugs + per-axial hull) -> close/fill -> largest-CC. Writes
+    """Extract the squirrel-monkey endocranial cavity as the (solid)
+    moving image for the cavity_binary SyN -- the same shared bone-shell
+    recipe every pillar uses (per-column basicranium floor + per-row
+    rostral/caudal plugs + per-axial convex hull) -> fill-holes ->
+    largest-CC. Uses CAVITY_BONE_LOW (watertight-shell threshold) so the
+    midline basicranium seals and the cavity is solid. Writes
     ``saimiri_cranial_cavity.nii.gz`` and returns its path."""
     import nibabel as nib
     import scipy.ndimage as sn
@@ -256,15 +334,15 @@ def extract_cavity(force=False, verbose=True):
     bone_mask = arr > BONE_LOW
     if not bone_mask.any():
         raise RuntimeError(
-            f'No voxels above BONE_LOW={BONE_LOW} in {SAIMIRI_RAS_ALIGNED}. '
-            f'The PROVISIONAL threshold needs calibrating to the staged scan '
-            f'(intensity range [{arr.min():.0f}, {arr.max():.0f}]).')
+            f'No voxels above BONE_LOW={BONE_LOW} in {SAIMIRI_RAS_ALIGNED} '
+            f'(intensity range [{arr.min():.0f}, {arr.max():.0f}]); the scan '
+            f'may be mis-staged or differently scaled than USNM 194346.')
     bone_centroid_world = aff[:3, :3] @ np.argwhere(bone_mask).mean(0) + aff[:3, 3]
     aff_centred = aff.copy()
     aff_centred[:3, 3] -= bone_centroid_world
 
     seed, info = cav.bone_shell_cavity(
-        arr, aff_centred, bone_low=BONE_LOW,
+        arr, aff_centred, bone_low=CAVITY_BONE_LOW,
         close_mm=SEED_CLOSE_MM,
         x_hull_half_mm=HULL_X_HALF_MM,
         y_hull_max_lowz_mm=HULL_Y_MAX_LOWZ_MM,

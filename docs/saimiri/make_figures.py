@@ -100,5 +100,60 @@ def main():
     return out
 
 
+def subject_figures():
+    """Subject-space figures from the staged-scan build (no-op with a note
+    if the registration cache is absent). Produces:
+
+    * ``saimiri_geometry.png`` -- source microCT orthoslices with the solid
+      endocranial cavity overlaid (the D2 geometry pipeline);
+    * ``saimiri_atlas_in_skull.png`` -- the canonical QC overlay
+      (bone shell + warped VALiDATe29 brain + S1/M1 targets).
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import nibabel as nib
+    from tuba.species import saimiri as S
+
+    if not (os.path.exists(S.SAIMIRI_RAS_ALIGNED) and os.path.exists(S.CAVITY_NII)):
+        print('  [subject figures] registration cache absent; stage the scan '
+              'and run `python -m tuba.species.saimiri build` first.')
+        return None
+    os.makedirs(FIG_DIR, exist_ok=True)
+
+    # --- geometry figure: source scan + solid cavity ---
+    sk = nib.load(S.SAIMIRI_RAS_ALIGNED)
+    arr = np.asarray(sk.dataobj).astype(np.float32)
+    cav = np.asarray(nib.load(S.CAVITY_NII).dataobj) > 0
+    vx = float(abs(sk.affine[0, 0]))
+    c = np.argwhere(cav).mean(0).astype(int)
+    fig, ax = plt.subplots(1, 3, figsize=(15, 5.6))
+    for k, (t, a) in enumerate([('sagittal', 0), ('coronal', 1), ('axial', 2)]):
+        bg = _slice(arr, a, int(c[a]))
+        cm = _slice(cav, a, int(c[a]))
+        ax[k].imshow(np.clip(bg.T, 0, 16000), origin='lower', cmap='gray',
+                     aspect='equal')
+        ax[k].imshow(np.ma.masked_where(~cm.T, cm.T), origin='lower',
+                     cmap='autumn', alpha=0.42, aspect='equal')
+        ax[k].set_title(f'{t}', fontsize=11)
+        ax[k].set_xticks([])
+        ax[k].set_yticks([])
+    fig.suptitle('Saimiri USNM 194346 microCT + solid endocranial cavity '
+                 f'({cav.sum()*vx**3/1000:.1f} mL) — 97.7 um isotropic, '
+                 'uncalibrated (geometry only)', fontsize=12)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    out1 = os.path.join(FIG_DIR, 'saimiri_geometry.png')
+    fig.savefig(out1, dpi=110)
+    plt.close(fig)
+    print(f'  wrote {out1}')
+
+    # --- atlas-in-skull QC: reuse the pillar's canonical figure ---
+    out2 = os.path.join(FIG_DIR, 'saimiri_atlas_in_skull.png')
+    S.qc_figure(out_png=out2, verbose=False)
+    print(f'  wrote {out2}')
+    return out1, out2
+
+
 if __name__ == '__main__':
     main()
+    subject_figures()
