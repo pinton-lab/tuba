@@ -23,6 +23,21 @@ def _slice(vol, axis, idx):
     return vol[tuple(sel)]
 
 
+def ct_window(arr, lo_pct=50.0, hi_pct=99.5):
+    """Display window for the uncalibrated microCT.
+
+    A fixed ``clip(0, 16000)`` is wrong for this scan on both ends: the
+    volume is dominated by zero padding / outside-the-reconstruction-circle
+    voxels, air inside the field of view sits at ~4000 counts, and
+    cortical bone runs past 40000, so a 16000 ceiling saturates *all*
+    bone to flat white and hides the trabecular/cortical gradient. Take
+    the window from the data instead: the median (air) as black point and
+    the 99.5th percentile (dense cortical bone) as white point.
+    """
+    sub = arr[::3, ::3, ::3]
+    return float(np.percentile(sub, lo_pct)), float(np.percentile(sub, hi_pct))
+
+
 def main():
     import matplotlib
     matplotlib.use('Agg')
@@ -127,20 +142,25 @@ def subject_figures():
     cav = np.asarray(nib.load(S.CAVITY_NII).dataobj) > 0
     vx = float(abs(sk.affine[0, 0]))
     c = np.argwhere(cav).mean(0).astype(int)
+    vmin, vmax = ct_window(arr)
     fig, ax = plt.subplots(1, 3, figsize=(15, 5.6))
     for k, (t, a) in enumerate([('sagittal', 0), ('coronal', 1), ('axial', 2)]):
         bg = _slice(arr, a, int(c[a]))
         cm = _slice(cav, a, int(c[a]))
-        ax[k].imshow(np.clip(bg.T, 0, 16000), origin='lower', cmap='gray',
-                     aspect='equal')
+        ax[k].imshow(bg.T, origin='lower', cmap='gray', aspect='equal',
+                     vmin=vmin, vmax=vmax)
+        # translucent fill + a crisp boundary, so the inner table stays
+        # readable underneath and the cavity/bone interface is checkable
         ax[k].imshow(np.ma.masked_where(~cm.T, cm.T), origin='lower',
-                     cmap='autumn', alpha=0.42, aspect='equal')
+                     cmap='autumn', alpha=0.25, aspect='equal')
+        ax[k].contour(cm.T, levels=[0.5], colors='red', linewidths=1.0)
         ax[k].set_title(f'{t}', fontsize=11)
         ax[k].set_xticks([])
         ax[k].set_yticks([])
-    fig.suptitle('Saimiri USNM 194346 microCT + solid endocranial cavity '
-                 f'({cav.sum()*vx**3/1000:.1f} mL) — 97.7 um isotropic, '
-                 'uncalibrated (geometry only)', fontsize=12)
+    fig.suptitle('Saimiri USNM 194346 microCT + endocranial cavity '
+                 f'({cav.sum()*vx**3/1000:.1f} mL, red) — 97.7 um isotropic, '
+                 f'uncalibrated (display window {vmin:.0f}–{vmax:.0f} counts)',
+                 fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     out1 = os.path.join(FIG_DIR, 'saimiri_geometry.png')
     fig.savefig(out1, dpi=110)

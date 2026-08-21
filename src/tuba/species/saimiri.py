@@ -45,15 +45,18 @@ Environment variables
 
 Calibration state
 -----------------
-The orientation, intensity thresholds, and cavity hull geometry below
-are CALIBRATED against the staged scan (USNM 194346): the rat/macaque
+The orientation, intensity thresholds, and cavity geometry below are
+CALIBRATED against the staged scan (USNM 194346): the rat/macaque
 museum-CT orientation convention transfers correctly (confirmed clean
-RAS by an orthoslice probe), the bone/cavity thresholds are set from the
-histogram, and the hull envelope + watertight-shell threshold give a
-solid ~15.9 mL endocranial cavity. The cavity_binary SyN to the
-VALiDATe29 brain mask fits to Dice 0.96, and the warped S1/M1 targets
-are anatomically correct (M1 rostral+dorsal to S1). Only the acoustics
-stay guarded (no HU-calibrated colony CT). See docs/saimiri/manuscript.
+RAS by an orthoslice probe), and the bone thresholds are set from the
+histogram. The scan's field of view clips the occiput, which breaks the
+shared cavity extractor's per-row plug assumption; `seal_floor_gaps`
+plus a per-plane fill give a 25.3 mL endocranial cavity whose boundary
+sits on the inner table (0.28 mm mean gap to bone). The cavity_binary
+SyN to the VALiDATe29 brain mask fits to Dice 0.978, and the warped
+S1/M1 targets are anatomically correct (M1 rostral+dorsal to S1). Only
+the acoustics stay guarded (no HU-calibrated colony CT). See
+docs/saimiri/manuscript.
 """
 from __future__ import annotations
 
@@ -152,16 +155,22 @@ NATIVE_PAD_VOXELS = 200
 # atlas-brain-mask registration; it need not be a perfect segmentation,
 # only solid and anatomically bounded.
 #
-# CAVITY_BONE_LOW (5000) is a WATERTIGHT-SHELL threshold, set *below* the
-# BONE_LOW air/bone knee (6000). Like the rat (whose 8-bit threshold-50
-# base is naturally watertight), the squirrel needs the thin midline
-# basicranium captured so the per-column floor seals it: at 6000 the
-# midline base drops below threshold and "outside" floods up into the
-# braincase centre (a hollow-centred cavity); at 5000 the floor is
-# watertight and the cavity is solid (verified: central-fill 0.97 vs
-# 0.26). The slightly thicker shell makes the volume a conservative,
-# inner-table-inclusive estimate. Confirmed on saimiri_cavity_solid.
-CAVITY_BONE_LOW = 5000.0
+# The cavity shell uses the SAME bone threshold as everything else
+# (BONE_LOW = the histogram air/bone knee), so the cavity boundary lands
+# on the real inner table. The braincase-centre leak this scan suffers is
+# NOT a threshold problem and must not be "fixed" by lowering the
+# threshold: doing so thickens the shell and insets the cavity ~2 mm all
+# round (measured: 15.9 mL, boundary 2.5 mm from the inner table).
+#
+# Real cause: this museum scan is cropped at the occiput (bone mass is
+# still rising at the last slice), so ~23% of rows never meet posterior
+# bone; their per-row caudal plug then swallows the whole braincase.
+# seal_floor_gaps rebuilds those rows' plug bounds from the nearest row
+# that spans >= PLUG_MIN_SPAN_MM of skull. Result: 24.2 mL with the
+# boundary 0.7 mm from the inner table (flat for 20-30 mm span).
+CAVITY_BONE_LOW = BONE_LOW
+SEAL_FLOOR_GAPS = True
+PLUG_MIN_SPAN_MM = 20.0
 SEED_CLOSE_MM = 1.5
 PLUG_SMOOTH_MM = 1.5
 # Generous braincase envelope (squirrel scale); confirmed non-clipping on
@@ -173,12 +182,12 @@ HULL_Y_MAX_LOWZ_MM = +8.0
 HULL_Y_MAX_HIGHZ_MM = +20.0
 HULL_Z_MIN_MM = -16.0
 HULL_Z_YCUTOFF_BREAK_MM = +1.0
-# Endocranial-cavity QC bracket. The solid extraction lands ~16 mL
-# (conservative, inner-table-inclusive); Saimiri cranial capacity in the
-# comparative literature spans ~16-26 mL across individuals/species. The
-# cavity is the registration moving image, so the affine to the 33 mL
-# VALiDATe29 brain mask absorbs the individual scale difference.
-CAVITY_TARGET_ML = (13.0, 22.0)
+# Endocranial-cavity QC bracket. The extraction lands ~24 mL, consistent
+# with a Saimiri whole-brain volume of ~22 mL plus CSF/meninges (cranial
+# capacity ~20-26 mL in the comparative literature). The cavity is the
+# registration moving image, so the affine to the 33 mL VALiDATe29 brain
+# mask still absorbs any individual scale difference.
+CAVITY_TARGET_ML = (20.0, 30.0)
 
 # ---------------------------------------------------------------------------
 # Acoustic model (deliverable 1) -- calibration state + mappings.
@@ -350,9 +359,17 @@ def extract_cavity(force=False, verbose=True):
         z_hull_min_mm=HULL_Z_MIN_MM,
         z_ycutoff_break_mm=HULL_Z_YCUTOFF_BREAK_MM,
         use_hull=True, use_geodesic_propagation=False,
-        smooth_plug_mm=PLUG_SMOOTH_MM, verbose=verbose)
+        smooth_plug_mm=PLUG_SMOOTH_MM,
+        seal_floor_gaps=SEAL_FLOOR_GAPS,
+        plug_min_span_mm=PLUG_MIN_SPAN_MM, verbose=verbose)
 
     cavm = sn.binary_fill_holes(seed)
+    # The occiput is cropped out of this scan's field of view, so a
+    # midline void escapes the 3D fill through the clipped face even
+    # though it is walled in within every cross-section (it shows up as
+    # a slot in sagittal QC). Reclaim it per-plane, never into bone.
+    cavm = cav.fill_holes_2p5d(cavm, exclude=arr > BONE_LOW)
+    cavm = sn.binary_fill_holes(cavm)
     lab, n = sn.label(cavm)
     if n > 1:
         sizes = np.bincount(lab.ravel())
@@ -618,7 +635,7 @@ def qc_figure(out_png=ATLAS_QC_PNG, targets=None, verbose=True):
         ax.set_xticks([])
         ax.set_yticks([])
     fig.suptitle('tuba.saimiri — VALiDATe29 atlas + S1/M1 targets in the '
-                 'Saimiri sciureus skull', fontsize=13)
+                 'Saimiri USNM 194346 skull', fontsize=13)
     fig.tight_layout()
     os.makedirs(os.path.dirname(out_png), exist_ok=True)
     fig.savefig(out_png, dpi=100)
