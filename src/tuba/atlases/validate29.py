@@ -7,6 +7,36 @@ density, T1, T2*), diffusion templates (FA, MD), ex-vivo templates, and
 **histologically-defined cortical labels** plus tractography-defined
 white-matter labels.
 
+Label coverage -- NOT a whole-brain parcellation
+------------------------------------------------
+Measured from the staged VALiDATe3-labels.nii.gz (212^3 @ 0.300 mm; 80
+distinct ids present, the lookup table runs to 97 with gaps):
+
+    shipped brain mask              33.03 mL   100.0 %
+    all labels                      14.90 mL    45.1 %
+      gray matter (ids 1-18)         9.21 mL    27.9 %
+      white matter (ids 19-80)       5.56 mL    16.8 %
+      ventricles + claustrum         0.13 mL     0.4 %
+
+The gray-matter parcellation is nine BILATERAL CORTICAL REGIONS and
+nothing else: PFC, M1, SMA, PV/S2, cingulate, APC, PPC, premotor, V1.
+There is no label for any subcortical gray structure (thalamus, basal
+ganglia, hippocampus, amygdala), none for the cerebellum (only the
+cerebellar peduncle, a tract), and none for the brainstem; temporal/
+auditory, orbitofrontal, insular, entorhinal, and extrastriate visual
+cortex are also unlabelled. This is sufficient for the S1/M1 targets
+this pillar exists to hit, but a subcortical or cerebellar target
+cannot be resolved from this atlas alone. The sparsity does not affect
+the registration: the SyN fixed image is the brain *mask*, not the
+labels.
+
+No fuller Saimiri parcellation is currently published -- CHIASM
+(nitrc.org/projects/smatlas) is the same group and the same label set
+(18 cortical ROIs + 57 WM tracts). Extending coverage means either
+tracing a cross-species prior (marmoset MBM / SAM is the closest
+well-parcellated New World monkey) or the print Gergen & MacLean /
+Emmers & Akert stereotaxic atlases.
+
 Reference
 ---------
 Schilling, K. G., Gao, Y., Stepniewska, I., Wu, T.-L., Wang, F.,

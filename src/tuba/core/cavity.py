@@ -50,7 +50,7 @@ several debug cycles in the mouse migration:
 from dataclasses import dataclass
 from typing import Optional
 import numpy as np
-from scipy.ndimage import binary_closing, label as cc_label
+from scipy.ndimage import binary_closing, binary_dilation, label as cc_label
 
 
 @dataclass
@@ -295,16 +295,16 @@ def bone_shell_cavity(arr, aff, *, bone_low,
         its basicranium below the brain, and every bone-bearing row has
         bone both rostral and caudal of the braincase. Both assumptions
         break on a skull whose midline basicranium is locally thinner
-        than ``bone_low``, or whose occiput runs out of the scanned
-        field of view: the offending row's bone extent collapses onto a
+        than ``bone_low``, or which leaves the cranium through an
+        opening: the offending row's bone extent collapses onto a
         small structure and its plug then swallows the braincase behind
         it (the cavity comes out as a hollow shell). With this flag the
         offending rows/columns are detected (bone span shorter than
         ``plug_min_span_mm``) and their plug bounds rebuilt from the
         nearest row that does span the cranium, so each plug follows the
         real bone surface. Off by default: the mouse/rat/macaque pillars
-        are unaffected. Used by the squirrel-monkey pillar, whose museum
-        microCT is cropped at the occiput.
+        are unaffected. Used by the squirrel-monkey pillar, whose skull
+        base is locally thin or sub-threshold.
     plug_min_span_mm : float, default 20.0
         Only meaningful with ``seal_floor_gaps``. Minimum rostro-caudal
         bone extent for a row to be trusted as spanning the cranium.
@@ -387,7 +387,7 @@ def bone_shell_cavity(arr, aff, *, bone_low,
         # A column only samples the basicranium if its bone actually
         # spans the cranium dorsoventrally. Where a skull has no
         # basicranium under the braincase -- because it is genuinely
-        # absent, sub-threshold, or cropped out of the field of view --
+        # absent or sub-threshold --
         # the first bone encountered from the ventral side is the VAULT,
         # k_first jumps to the top of the head, and the floor then fills
         # the entire column, punching a void straight through the middle
@@ -440,8 +440,8 @@ def bone_shell_cavity(arr, aff, *, bone_low,
     if seal_floor_gaps:
         # The plugs assume every bone-bearing row's bone extent SPANS the
         # cranium, so that "beyond the last bone" is outside. That fails
-        # for a row which leaves the skull through an opening or through a
-        # cropped field of view: its bone extent collapses onto a small
+        # for a row which leaves the skull through an opening: its bone
+        # extent collapses onto a small
         # structure (e.g. a frontal shelf) and the plug then swallows the
         # whole braincase behind it. Detect such rows by their short bone
         # span and rebuild their bounds from the nearest row that does
@@ -518,6 +518,14 @@ def bone_shell_cavity(arr, aff, *, bone_low,
             return _Path(pts[hull.vertices]).contains_points(
                 coords).reshape(out_shape)
 
+        # For the hull, we dilate the bone mask to ensure the hull properly
+        # encloses the braincase even where the bone is sparse (e.g., at the
+        # dorsal end, where the vault rim is thin). This ensures the hull
+        # extends to include the braincase, not just the bone rim.
+        dilate_mm = 1.0  # dilate by 1 mm to ensure braincase is enclosed
+        dilate_iters = max(1, int(round(dilate_mm / voxel_mm)))
+        bone_for_hull = binary_dilation(closed_bone, iterations=dilate_iters)
+
         hull_axial = np.zeros_like(closed_bone)
         j_hi_lowz = int(round((y_hull_max_lowz_mm - aff[1, 3]) / aff[1, 1]))
         j_hi_highz = int(round((y_hull_max_highz_mm - aff[1, 3]) / aff[1, 1]))
@@ -526,14 +534,100 @@ def bone_shell_cavity(arr, aff, *, bone_low,
         k_break = int(round((z_ycutoff_break_mm - aff[2, 3]) / aff[2, 2]))
         k_break = max(0, min(nk_, k_break))
         for k in range(k_z_min, nk_):
+            # Build hull from ROI (j >= j_lo_k)
             j_lo_k = j_hi_lowz if k < k_break else j_hi_highz
-            sl = closed_bone[i_lo:i_hi, j_lo_k:, k]
+            sl = bone_for_hull[i_lo:i_hi, j_lo_k:, k]
             if sl.sum() < 10:
                 continue
             inside = _slice_hull(sl, (i_lo, j_lo_k), (ni_, nj_))
             if inside is None:
                 continue
             hull_axial[:, :, k] = inside
+
+            # Also build hull in the region below ROI (j < j_lo_k) to ensure
+            # the hull extends to the volume boundary for proper outside region
+            # definition. Use the bone in that region to define the hull.
+            if j_lo_k > 0:
+                sl_low = bone_for_hull[i_lo:i_hi, :j_lo_k, k]
+                if sl_low.sum() >= 5:  # Need some bone in this region
+                    inside_low = _slice_hull(sl_low, (i_lo, 0), (ni_, nj_))
+                    if inside_low is not None:
+                        # Merge the low hull with the main hull
+                        # Note: inside_low is already in full volume coordinates
+                        hull_axial[:, :, k] |= inside_low
+
+        # Fill gaps in the hull by propagating from the nearest slice that has bone.
+        # This handles slices with too little bone to define a hull.
+        # For each slice without hull, copy from the nearest slice that has hull.
+        hull_k = np.where(hull_axial.any(axis=(0, 1)))[0]
+        if len(hull_k) > 0 and hull_axial.shape[2] > len(hull_k):
+            # Find slices without hull
+            no_hull_k = np.where(~hull_axial.any(axis=(0, 1)))[0]
+            if len(no_hull_k) > 0:
+                # For each slice without hull, find the nearest slice with hull
+                for k in no_hull_k:
+                    # Find nearest hull slice (prefer same direction from k)
+                    if len(hull_k) > 0:
+                        # Use the nearest hull slice (could be above or below)
+                        k_dist = np.abs(hull_k - k)
+                        nearest_k = hull_k[np.argmin(k_dist)]
+                        hull_axial[:, :, k] = hull_axial[:, :, nearest_k]
+                if verbose:
+                    print(f'  hull gap fill: {len(no_hull_k)} slices filled from {len(hull_k)} hull slices')
+
+        # Extrapolate the hull to the dorsal boundary if no bone exists there.
+        # The hull must extend to enclose the braincase even where the vault
+        # rim is sub-threshold and no bone is present.
+        # Use the largest hull in the upper ventral braincase region as template.
+        if hull_k.any():
+            # Find the largest hull in the upper ventral braincase region (k_z_min+100 to k_z_min+200).
+            # This region has a hull that's larger than the lower ventral region but still
+            # extends to reasonable ventral j values for proper outside region definition.
+            upper_ventral_k_min = k_z_min + 100
+            upper_ventral_k_max = k_z_min + 200
+            upper_ventral_hull_k = int(hull_k[(hull_k >= upper_ventral_k_min) & (hull_k <= upper_ventral_k_max)][
+                np.argmax([hull_axial[:, :, k].sum() for k in hull_k if upper_ventral_k_min <= k <= upper_ventral_k_max])])
+            dorsal_hull_k = int(hull_k.max())
+            # Fill from dorsal_hull_k to the top of the volume
+            for k in range(dorsal_hull_k + 1, nk_):
+                hull_axial[:, :, k] = hull_axial[:, :, upper_ventral_hull_k]
+            if verbose:
+                print(f'  hull dorsal extrapolation: filled {nk_ - 1 - dorsal_hull_k} slices from k={upper_ventral_hull_k} (upper ventral hull)')
+
+        # Extrapolate the hull to the ventral boundary (j=0) to ensure proper
+        # outside region definition. The hull must extend to volume boundaries
+        # so the outside region can flow around it.
+        # Find the most ventral hull slice and use it to fill lower j regions.
+        hull_j = np.where(hull_axial.any(axis=(0, 2)))[0]
+        if len(hull_j) > 0 and hull_j.min() > 0:
+            # Use the most ventral hull as template for extrapolation
+            ventral_hull_j = int(hull_j.min())
+            for j in range(0, ventral_hull_j):
+                hull_axial[:, j, :] = hull_axial[:, ventral_hull_j, :]
+            if verbose:
+                print(f'  hull ventral extrapolation: filled {ventral_hull_j} rows from j={ventral_hull_j}')
+
+        # Also extrapolate to the dorsal boundary in j direction if needed
+        if len(hull_j) > 0 and hull_j.max() < nj_ - 1:
+            dorsal_hull_j = int(hull_j.max())
+            for j in range(dorsal_hull_j + 1, nj_):
+                hull_axial[:, j, :] = hull_axial[:, dorsal_hull_j, :]
+            if verbose:
+                print(f'  hull dorsal j extrapolation: filled {nj_ - 1 - dorsal_hull_j} rows from j={dorsal_hull_j}')
+
+        # Dilate the hull to ensure it properly encloses the braincase at the dorsal end.
+        # The hull is built from bone, but the braincase extends beyond the bone rim at
+        # the dorsal end (where the vault rim is thin). Dilating the hull by 2 mm
+        # ensures it encloses the braincase even where bone is sparse.
+        hull_dilate_mm = 2.0
+        hull_dilate_iters = max(1, int(round(hull_dilate_mm / voxel_mm)))
+        hull_dilated = np.zeros_like(hull_axial)
+        for k in range(nk_):
+            hull_dilated[:, :, k] = binary_dilation(hull_axial[:, :, k], iterations=hull_dilate_iters)
+        hull_axial = hull_dilated
+        if verbose:
+            print(f'  hull dilation: {hull_dilate_mm} mm ({hull_dilate_iters} iter)')
+
         outside_hull = ~hull_axial
         shell = closed_bone | seal | floor | outside_hull
         if verbose:
@@ -599,7 +693,7 @@ def fill_holes_2p5d(mask, exclude=None):
 
     A plain 3D :func:`scipy.ndimage.binary_fill_holes` only fills voids
     that are enclosed *in 3D*. A cavity extracted from a skull whose
-    field of view clips an opening (e.g. a cropped occiput) can keep a
+    field of view clips an opening can keep a
     void that escapes in 3D through that clip, yet is plainly enclosed
     in every 2D cross-section -- it shows up as a slot or a hole in
     orthoslice QC. Filling per-slice in all three planes reclaims it

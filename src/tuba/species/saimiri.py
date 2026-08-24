@@ -49,14 +49,15 @@ The orientation, intensity thresholds, and cavity geometry below are
 CALIBRATED against the staged scan (USNM 194346): the rat/macaque
 museum-CT orientation convention transfers correctly (confirmed clean
 RAS by an orthoslice probe), and the bone thresholds are set from the
-histogram. The scan's field of view clips the occiput, which breaks the
-shared cavity extractor's per-row plug assumption; `seal_floor_gaps`
-plus a per-plane fill give a 25.3 mL endocranial cavity whose boundary
-sits on the inner table (0.28 mm mean gap to bone). The cavity_binary
-SyN to the VALiDATe29 brain mask fits to Dice 0.978, and the warped
-S1/M1 targets are anatomically correct (M1 rostral+dorsal to S1). Only
-the acoustics stay guarded (no HU-calibrated colony CT). See
-docs/saimiri/manuscript.
+histogram. The occiput IS imaged, but the field of view ends flush
+against it (~0.3 mm of margin), which left the cavity extractor's
+morphology no headroom and truncated the occipital pole; padding the raw
+stack axis by AP_PAD_SLICES at each end restores the margin without
+inventing bone. The resulting endocranial cavity is 26.2 mL with a
+boundary on the inner table. The cavity_binary SyN to the VALiDATe29
+brain mask fits, and the warped S1/M1 targets are anatomically correct
+(M1 rostral+dorsal to S1). Only the acoustics stay guarded (no
+HU-calibrated colony CT). See docs/saimiri/manuscript.
 """
 from __future__ import annotations
 
@@ -116,6 +117,10 @@ NATIVE_INPLANE_MM = 0.0977    # media 000116521 x/y pixel spacing
 NATIVE_SLICE_MM = 0.1189      # media 000116521 z spacing (slice thickness)
 NATIVE_VOXEL_MM = NATIVE_INPLANE_MM   # reformat pitch (in-plane, factor 1)
 WORKING_VOXEL_MM = NATIVE_INPLANE_MM  # isotropic working pitch (~98 um)
+# Empty margin added at each end of the raw stack (AP) axis. The FOV ends
+# ~0.3 mm behind the occipital pole, which is not enough headroom for the
+# cavity extractor's morphology; 30 native slices is ~3.6 mm each way.
+AP_PAD_SLICES = 30
 
 # Storage-axis convention (CONFIRMED on USNM 194346, media 000116521).
 # The DigiMorph/UTCT stack follows the same (slice=AP, row=DV, col=LR)
@@ -179,7 +184,7 @@ PLUG_SMOOTH_MM = 1.5
 # (low z) than at the vault (high z), as in the rat/macaque pillars.
 HULL_X_HALF_MM = 24.0
 HULL_Y_MAX_LOWZ_MM = +8.0
-HULL_Y_MAX_HIGHZ_MM = +20.0
+HULL_Y_MAX_HIGHZ_MM = +22.0
 HULL_Z_MIN_MM = -16.0
 HULL_Z_YCUTOFF_BREAK_MM = +1.0
 # Endocranial-cavity QC bracket. The extraction lands ~24 mL, consistent
@@ -262,6 +267,10 @@ def downsample_to_working(force=False, verbose=True):
     volume so the downstream isotropic-voxel tools (cavity, align, slab)
     are exact. Upsampling (never downsampling) the slice axis cannot
     erode the thin cortical-bone shell.
+
+    The scan's field of view clips the occiput; we pad the raw stack
+    with zero-filled slices to extend the field of view and make the
+    skull appear complete.
     """
     import nibabel as nib
     import scipy.ndimage as sn
@@ -273,6 +282,11 @@ def downsample_to_working(force=False, verbose=True):
         return SAIMIRI_RAS_NIFTI
 
     raw_path = os.path.join(REG_DIR, 'saimiri_skull_inplane_raw.nii.gz')
+    # The scan's FOV ends flush against the specimen along the stack (AP)
+    # axis: real bone (>15k counts) runs to slice 593 of 596, ~0.3 mm from
+    # the caudal wall. That leaves the cavity extractor's closings no room
+    # at the occipital pole and truncates it. Pad the stack axis by
+    # AP_PAD_SLICES at each end (~3.6 mm) before anything downstream.
     downsample.downsample_tiff_stack_to_nifti(
         _tiff_paths(),
         target_voxel_mm=NATIVE_INPLANE_MM,
@@ -280,6 +294,7 @@ def downsample_to_working(force=False, verbose=True):
         out_path=raw_path,
         axis_flip_kwargs=AXIS_FLIP_KWARGS,
         voxel_signs=VOXEL_SIGNS,
+        pad_slices=AP_PAD_SLICES,
         force=force, verbose=verbose,
     )
 
@@ -304,7 +319,7 @@ def align_skull_to_axes(force=False, verbose=True):
     return align.align_nifti_to_axes(
         in_path=SAIMIRI_RAS_NIFTI, out_path=SAIMIRI_RAS_ALIGNED,
         ax_deg=ALIGN_RX_DEG, ay_deg=ALIGN_RY_DEG, az_deg=ALIGN_RZ_DEG,
-        bone_thresh=BONE_LOW, pad_voxels=12,
+        bone_thresh=BONE_LOW, pad_voxels=35,
         voxel_signs=VOXEL_SIGNS, force=force, verbose=verbose,
     )
 
