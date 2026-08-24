@@ -35,6 +35,9 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+# macOS AppleDouble sidecars, which .DS_Store above does not cover
+# (they appear as ._.DS_Store, ._foo.py, ... next to the real file).
+._*
 
 # LaTeX build outputs (in docs/<species>/)
 docs/**/*.aux
@@ -58,3 +61,12 @@ data/cache/
 # match the repo-root dirs, NOT the tracked src/tuba/data/ package.
 /data/
 /skull_sources/
+# Per-species staging/build caches dropped at the repo root by the
+# fetchers and species drivers. These are multi-GB: /saimiri alone is
+# ~1.6 GB, so an unguarded `git add -A` would try to commit the scan
+# data this repo exists to NOT ship.
+/saimiri/
+/mouse/
+/rat/
+/macaque/
+/human/
