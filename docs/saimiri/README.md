@@ -17,7 +17,7 @@ siblings.
 
 | Role | Dataset | Source | License |
 |------|---------|--------|---------|
-| skull | *Saimiri sciureus* dry-skull microCT, USNM 338948, 0.1189 mm iso | UTCT / DigiMorph (oVert mirror on MorphoSource) | interactive-only (educational/research) |
+| skull | *Saimiri* sp. dry-skull microCT, NMNH USNM 194346 (MorphoSource media 000116521), 490 slices, 0.0977 mm in-plane x 0.1189 mm slice (anisotropic) | UTCT / DigiMorph (oVert mirror on MorphoSource) | interactive-only (per-record approval) |
 | atlas | VALiDATe29 multi-channel squirrel-monkey MRI atlas (29 animals) | NITRC ([validate29](https://www.nitrc.org/projects/validate29/)) | CC BY |
 
 ```bash
@@ -61,25 +61,44 @@ python -m tuba.species.saimiri report   # PPW table (no data needed)
 Cavity `cavity_binary` SyN (affine + deformable) registers the subject
 endocranial cavity to the VALiDATe29 brain mask; the template + cortical
 labels are warped back into subject space. `export_targets()` writes the
-S1 (areas 3b, 1) and M1 (area 4) hand-representation coordinates in the
-subject simulation frame, and `qc_figure()` writes the orthoslice overlay.
+S1 (anterior parietal cortex) and M1 (primary motor cortex) coordinates in
+the subject simulation frame, and `qc_figure()` writes the orthoslice
+overlay.
 
 ```bash
 python -m tuba.species.saimiri build    # ingest → cavity → SyN → targets → QC → report
 ```
 
-Cortical label spellings vary across VALiDATe29 releases, so
-`tuba.atlases.validate29.resolve_label` matches stable area-number
-substrings (`area 3b`, `area 1`, `area 4`) rather than a full canonical
-name; confirm against the staged LUT.
+VALiDATe29's parcellation is **region-level, not Brodmann-area-level** —
+there is no `area 3b` / `area 1` / `area 4` label. The S1 hand areas
+3a/3b/1/2 are bundled into `anterior_parietal_cortex` (APC, l/r ids
+11/12) and M1 is `primary_motor_cortex` (l/r ids 3/4); PV/S2 is ids 7/8.
+Left and right are separate ids, so
+`tuba.atlases.validate29.resolve_label` is hemisphere-aware and matches
+region keywords (`anterior_parietal`, `primary_motor`, `parietal_ventral`)
+rather than area numbers. Splitting 3b from area 1, or isolating the hand
+knob, needs a stereotaxic prior that is not in the distributed volume.
 
-## Provisional constants
+The label volume is also **not a whole-brain parcellation**: 80 distinct
+ids fill 45.1% of the shipped brain mask, and the gray matter is nine
+bilateral cortical regions and nothing else — no subcortical gray, no
+cerebellum, no brainstem. Enough for the S1/M1 aim; see the manuscript
+§atlas for the full coverage table.
+
+## Scan-dependent constants (calibrated)
 
 Orientation flips, intensity thresholds, and the cavity hull geometry in
-`tuba.species.saimiri` are marked `PROVISIONAL`: like every pillar they
-are fixed by an orientation/histogram probe on the *staged* scan. They
-carry rat/macaque-scaled defaults so the pipeline runs the moment the
-scan lands, but must be re-confirmed before any result is trusted.
+`tuba.species.saimiri` are **calibrated against the staged scan**
+(USNM 194346), not provisional: the rat/macaque museum-CT orientation
+convention was confirmed clean RAS by an orthoslice probe, and the bone
+thresholds are set from the histogram.
+
+One scan-specific note: the field of view ends flush against the occiput
+(real bone runs to slice 593 of 596, ~0.3 mm from the caudal wall), which
+leaves the cavity extractor's morphology no headroom and truncates the
+occipital pole. `downsample_to_working` therefore pads the raw stack axis
+by `AP_PAD_SLICES = 30` (~3.6 mm) at each end before isotropisation. No
+bone is invented — the padding only restores empty margin.
 
 ## Out of scope here (D3–D7, solver siblings)
 
