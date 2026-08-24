@@ -38,7 +38,7 @@ jobs:
           # antspyx wheels are heavy and not needed for the import/manifest
           # smoke tests; the regression tests skip themselves when legacy
           # data is absent, which it always is on CI.
-          uv pip install numpy scipy nibabel pynrrd tifffile scikit-image matplotlib pytest
+          uv pip install numpy scipy nibabel pynrrd tifffile scikit-image matplotlib pytest ruff
 
       - name: Install TUBA (editable, no extras)
         run: uv pip install -e . --no-deps
@@ -68,5 +68,19 @@ jobs:
               assert p.name and p.n_labels > 0
           print(f'{len(PARCELLATIONS)} parcellations catalogued')"
 
-      - name: Regression tests (will self-skip on CI; verifies harness)
-        run: pytest tests/ -v || true
+      - name: Lint (error-class rules only)
+        # Deliberately NOT ruff's full default set: that currently reports
+        # ~280 findings (mostly import order and unused imports), so gating
+        # on it would just mean a permanently red build. E9/F63/F7 are the
+        # "this code is actually broken" subset -- syntax errors, invalid
+        # comparisons, unreachable constructs -- and the tree is clean on
+        # them today. Widen this as the backlog is cleared; F82
+        # (undefined-name) is the obvious next rung.
+        run: ruff check . --select E9,F63,F7
+
+      - name: Regression tests
+        # No `|| true`: the suite must be able to fail the build. Tests that
+        # need staged data or antspyx skip themselves (verified: 39 passed,
+        # 3 skipped, 0 failed under exactly this dependency set with an
+        # empty HOME), so a real failure here is a real regression.
+        run: pytest tests/ -v
