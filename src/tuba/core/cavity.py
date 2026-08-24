@@ -50,7 +50,7 @@ several debug cycles in the mouse migration:
 from dataclasses import dataclass
 from typing import Optional
 import numpy as np
-from scipy.ndimage import binary_closing, label as cc_label
+from scipy.ndimage import binary_closing, binary_dilation, label as cc_label
 
 
 @dataclass
@@ -206,6 +206,8 @@ def bone_shell_cavity(arr, aff, *, bone_low,
                        caudal_seal_mm=0.0, use_hull=True,
                        use_geodesic_propagation=True,
                        smooth_plug_mm=0.0,
+                       seal_floor_gaps=False,
+                       plug_min_span_mm=20.0,
                        verbose=True):
     """Bone-shell-bounded cavity extractor (macaque recipe).
 
@@ -286,6 +288,27 @@ def bone_shell_cavity(arr, aff, *, bone_low,
         2-4 mm give a smoothly curved plug surface, which is useful
         for the rat at 118 um voxel pitch where the per-row plug's
         stepping is visible in the cavity contour.
+    seal_floor_gaps : bool, default False
+        Make the basicranium floor and the rostral / caudal plugs
+        robust to rows and columns whose bone does *not* bracket the
+        cranium. The plain recipe assumes every bone-bearing column has
+        its basicranium below the brain, and every bone-bearing row has
+        bone both rostral and caudal of the braincase. Both assumptions
+        break on a skull whose midline basicranium is locally thinner
+        than ``bone_low``, or which leaves the cranium through an
+        opening: the offending row's bone extent collapses onto a
+        small structure and its plug then swallows the braincase behind
+        it (the cavity comes out as a hollow shell). With this flag the
+        offending rows/columns are detected (bone span shorter than
+        ``plug_min_span_mm``) and their plug bounds rebuilt from the
+        nearest row that does span the cranium, so each plug follows the
+        real bone surface. Off by default: the mouse/rat/macaque pillars
+        are unaffected. Used by the squirrel-monkey pillar, whose skull
+        base is locally thin or sub-threshold.
+    plug_min_span_mm : float, default 20.0
+        Only meaningful with ``seal_floor_gaps``. Minimum rostro-caudal
+        bone extent for a row to be trusted as spanning the cranium.
+        The squirrel-monkey result is flat for 20-30 mm.
 
     Returns
     -------
@@ -296,7 +319,9 @@ def bone_shell_cavity(arr, aff, *, bone_low,
         ``cavity_raw_mm3``, ``cavity_mm3``, etc.
     """
     from scipy.ndimage import (binary_closing as _bc,
+                                binary_fill_holes as _bfh_2d,
                                 binary_propagation as _bp,
+                                distance_transform_edt as _sn_edt,
                                 label as _label)
     voxel_mm = float(abs(aff[0, 0]))
     bone = arr > bone_low
@@ -338,6 +363,9 @@ def bone_shell_cavity(arr, aff, *, bone_low,
     ni_, nj_, nk_ = arr.shape
     n_smooth = max(0, int(round(smooth_plug_mm / voxel_mm)))
     smooth_size = 2 * n_smooth + 1 if n_smooth > 0 else 1
+    # Minimum bone extent (in voxels) for a row/column to be trusted as
+    # spanning the cranium; only consulted when seal_floor_gaps is set.
+    min_span_vox = max(1, int(round(plug_min_span_mm / voxel_mm)))
 
     def _smooth2d(arr2d, size):
         if size <= 1:
@@ -355,35 +383,109 @@ def bone_shell_cavity(arr, aff, *, bone_low,
     # argmax returns index of FIRST True along axis (k=0 ventral side
     # after the COL_FLIP=True convention; smallest k = most ventral).
     k_first = np.argmax(cranial_subvol, axis=2)
-    # Where col_has_bone == False, argmax returns 0 -- mark those as nk_
-    # (no plug there) so they don't drag the smoothed surface down.
-    k_first = np.where(col_has_bone, k_first, nk_)
+    if seal_floor_gaps:
+        # A column only samples the basicranium if its bone actually
+        # spans the cranium dorsoventrally. Where a skull has no
+        # basicranium under the braincase -- because it is genuinely
+        # absent or sub-threshold --
+        # the first bone encountered from the ventral side is the VAULT,
+        # k_first jumps to the top of the head, and the floor then fills
+        # the entire column, punching a void straight through the middle
+        # of the braincase. (Testing col_has_bone cannot catch this: it
+        # is True for those columns precisely because the vault is
+        # there.) Detect the offending columns by their short bone span
+        # and rebuild their floor height from the nearest column that
+        # does span the cranium -- the dorsoventral analogue of the
+        # rostro-caudal plug repair below.
+        k_last_col = nk_ - 1 - np.argmax(cranial_subvol[:, :, ::-1], axis=2)
+        col_span = np.where(col_has_bone, k_last_col - k_first, -1)
+        col_good = col_has_bone & (col_span >= min_span_vox)
+        if col_good.any() and not col_good.all():
+            idx = _sn_edt(~col_good, return_distances=False,
+                          return_indices=True)
+            k_first = np.where(col_good, k_first, k_first[tuple(idx)])
+            # Keep the floor on columns that actually have bone: never
+            # emit shell into a column that is empty from base to vault.
+            floor_gate = _bfh_2d(col_good) & col_has_bone
+            if verbose:
+                print(f'  floor columns rebuilt (bone span < '
+                      f'{plug_min_span_mm} mm): '
+                      f'{int((col_has_bone & ~col_good & floor_gate).sum())} '
+                      f'of {int(col_has_bone.sum())}')
+        else:
+            k_first = np.where(col_has_bone, k_first, nk_)
+            floor_gate = col_has_bone
+    else:
+        # Where col_has_bone == False, argmax returns 0 -- mark those as nk_
+        # (no plug there) so they don't drag the smoothed surface down.
+        k_first = np.where(col_has_bone, k_first, nk_)
+        floor_gate = col_has_bone
     k_first_smooth = _smooth2d(k_first, smooth_size)
     k_grid = np.arange(nk_)[None, None, :]
     floor = np.zeros_like(closed_bone)
-    floor[:, j_lo:, :] = col_has_bone[..., None] & (k_grid < k_first_smooth[..., None])
+    floor[:, j_lo:, :] = floor_gate[..., None] & (k_grid < k_first_smooth[..., None])
     if verbose:
         print(f'  per-column basicranium floor: {int(floor.sum())} voxels'
-              f'{" (smoothed)" if smooth_size > 1 else ""}')
+              f'{" (smoothed)" if smooth_size > 1 else ""}'
+              f'{" (gap-sealed)" if seal_floor_gaps else ""}')
 
-    # ---- Per-row rostral plug ----
-    # j_first[i, k] = smallest j where closed_bone[i, j, k] is True
-    # (most-rostral bone in row (i, k)). Plug = everything rostral.
+    # ---- Per-row rostral / caudal plugs ----
+    # j_first[i, k] / j_last[i, k] = most-rostral / most-caudal bone in
+    # row (i, k). Plugs = everything beyond those bounds.
     j_first = np.argmax(closed_bone, axis=1)
     row_has_bone = closed_bone.any(axis=1)
-    j_first = np.where(row_has_bone, j_first, nj_)
-    j_first_smooth = _smooth2d(j_first, smooth_size)
+    j_last = nj_ - 1 - np.argmax(closed_bone[:, ::-1, :], axis=1)
     j_grid = np.arange(nj_)[None, :, None]
-    rostral_plug = (row_has_bone[:, None, :] & (j_grid < j_first_smooth[:, None, :]))
+
+    if seal_floor_gaps:
+        # The plugs assume every bone-bearing row's bone extent SPANS the
+        # cranium, so that "beyond the last bone" is outside. That fails
+        # for a row which leaves the skull through an opening: its bone
+        # extent collapses onto a small
+        # structure (e.g. a frontal shelf) and the plug then swallows the
+        # whole braincase behind it. Detect such rows by their short bone
+        # span and rebuild their bounds from the nearest row that does
+        # span the cranium, so each plug follows the real rostral/caudal
+        # bone surface. Reduces to the default when every row spans.
+        span = np.where(row_has_bone, j_last - j_first, -1)
+        good = row_has_bone & (span >= min_span_vox)
+        if good.any() and not good.all():
+            idx = _sn_edt(~good, return_distances=False, return_indices=True)
+            j_first = np.where(good, j_first, j_first[tuple(idx)])
+            j_last = np.where(good, j_last, j_last[tuple(idx)])
+            # Keep the plug on rows that actually have bone: a row that is
+            # empty end to end must not emit shell into free space.
+            plug_gate = _bfh_2d(good) & row_has_bone
+            if verbose:
+                n_bad = int((row_has_bone & ~good & plug_gate).sum())
+                print(f'  plug rows rebuilt (bone span < '
+                      f'{plug_min_span_mm} mm = {min_span_vox} vox): '
+                      f'{n_bad} of {int(row_has_bone.sum())}')
+        else:
+            # No row (or every row) qualifies: fall back to the default
+            # bounds. The sentinels matter -- without them a bone-free
+            # row keeps argmax's 0 / nj_-1 and reads as "open end to
+            # end", which the median smoothing then spreads into real
+            # rows and unseals the shell.
+            j_first = np.where(row_has_bone, j_first, nj_)
+            j_last = np.where(row_has_bone, j_last, -1)
+            plug_gate = row_has_bone
+            if verbose:
+                print(f'  plug rows rebuilt: none (no row spans '
+                      f'{plug_min_span_mm} mm; using default bounds)')
+    else:
+        j_first = np.where(row_has_bone, j_first, nj_)
+        j_last = np.where(row_has_bone, j_last, -1)
+        plug_gate = row_has_bone
+
+    j_first_smooth = _smooth2d(j_first, smooth_size)
+    rostral_plug = (plug_gate[:, None, :] & (j_grid < j_first_smooth[:, None, :]))
     if verbose:
         print(f'  per-row rostral plug:        {int(rostral_plug.sum())} voxels'
               f'{" (smoothed)" if smooth_size > 1 else ""}')
 
-    # ---- Per-row caudal plug (mirror) ----
-    j_last = nj_ - 1 - np.argmax(closed_bone[:, ::-1, :], axis=1)
-    j_last = np.where(row_has_bone, j_last, -1)
     j_last_smooth = _smooth2d(j_last, smooth_size)
-    caudal_plug = (row_has_bone[:, None, :] & (j_grid > j_last_smooth[:, None, :]))
+    caudal_plug = (plug_gate[:, None, :] & (j_grid > j_last_smooth[:, None, :]))
     if verbose:
         print(f'  per-row caudal plug:         {int(caudal_plug.sum())} voxels'
               f'{" (smoothed)" if smooth_size > 1 else ""}')
@@ -416,6 +518,14 @@ def bone_shell_cavity(arr, aff, *, bone_low,
             return _Path(pts[hull.vertices]).contains_points(
                 coords).reshape(out_shape)
 
+        # For the hull, we dilate the bone mask to ensure the hull properly
+        # encloses the braincase even where the bone is sparse (e.g., at the
+        # dorsal end, where the vault rim is thin). This ensures the hull
+        # extends to include the braincase, not just the bone rim.
+        dilate_mm = 1.0  # dilate by 1 mm to ensure braincase is enclosed
+        dilate_iters = max(1, int(round(dilate_mm / voxel_mm)))
+        bone_for_hull = binary_dilation(closed_bone, iterations=dilate_iters)
+
         hull_axial = np.zeros_like(closed_bone)
         j_hi_lowz = int(round((y_hull_max_lowz_mm - aff[1, 3]) / aff[1, 1]))
         j_hi_highz = int(round((y_hull_max_highz_mm - aff[1, 3]) / aff[1, 1]))
@@ -424,14 +534,100 @@ def bone_shell_cavity(arr, aff, *, bone_low,
         k_break = int(round((z_ycutoff_break_mm - aff[2, 3]) / aff[2, 2]))
         k_break = max(0, min(nk_, k_break))
         for k in range(k_z_min, nk_):
+            # Build hull from ROI (j >= j_lo_k)
             j_lo_k = j_hi_lowz if k < k_break else j_hi_highz
-            sl = closed_bone[i_lo:i_hi, j_lo_k:, k]
+            sl = bone_for_hull[i_lo:i_hi, j_lo_k:, k]
             if sl.sum() < 10:
                 continue
             inside = _slice_hull(sl, (i_lo, j_lo_k), (ni_, nj_))
             if inside is None:
                 continue
             hull_axial[:, :, k] = inside
+
+            # Also build hull in the region below ROI (j < j_lo_k) to ensure
+            # the hull extends to the volume boundary for proper outside region
+            # definition. Use the bone in that region to define the hull.
+            if j_lo_k > 0:
+                sl_low = bone_for_hull[i_lo:i_hi, :j_lo_k, k]
+                if sl_low.sum() >= 5:  # Need some bone in this region
+                    inside_low = _slice_hull(sl_low, (i_lo, 0), (ni_, nj_))
+                    if inside_low is not None:
+                        # Merge the low hull with the main hull
+                        # Note: inside_low is already in full volume coordinates
+                        hull_axial[:, :, k] |= inside_low
+
+        # Fill gaps in the hull by propagating from the nearest slice that has bone.
+        # This handles slices with too little bone to define a hull.
+        # For each slice without hull, copy from the nearest slice that has hull.
+        hull_k = np.where(hull_axial.any(axis=(0, 1)))[0]
+        if len(hull_k) > 0 and hull_axial.shape[2] > len(hull_k):
+            # Find slices without hull
+            no_hull_k = np.where(~hull_axial.any(axis=(0, 1)))[0]
+            if len(no_hull_k) > 0:
+                # For each slice without hull, find the nearest slice with hull
+                for k in no_hull_k:
+                    # Find nearest hull slice (prefer same direction from k)
+                    if len(hull_k) > 0:
+                        # Use the nearest hull slice (could be above or below)
+                        k_dist = np.abs(hull_k - k)
+                        nearest_k = hull_k[np.argmin(k_dist)]
+                        hull_axial[:, :, k] = hull_axial[:, :, nearest_k]
+                if verbose:
+                    print(f'  hull gap fill: {len(no_hull_k)} slices filled from {len(hull_k)} hull slices')
+
+        # Extrapolate the hull to the dorsal boundary if no bone exists there.
+        # The hull must extend to enclose the braincase even where the vault
+        # rim is sub-threshold and no bone is present.
+        # Use the largest hull in the upper ventral braincase region as template.
+        if hull_k.any():
+            # Find the largest hull in the upper ventral braincase region (k_z_min+100 to k_z_min+200).
+            # This region has a hull that's larger than the lower ventral region but still
+            # extends to reasonable ventral j values for proper outside region definition.
+            upper_ventral_k_min = k_z_min + 100
+            upper_ventral_k_max = k_z_min + 200
+            upper_ventral_hull_k = int(hull_k[(hull_k >= upper_ventral_k_min) & (hull_k <= upper_ventral_k_max)][
+                np.argmax([hull_axial[:, :, k].sum() for k in hull_k if upper_ventral_k_min <= k <= upper_ventral_k_max])])
+            dorsal_hull_k = int(hull_k.max())
+            # Fill from dorsal_hull_k to the top of the volume
+            for k in range(dorsal_hull_k + 1, nk_):
+                hull_axial[:, :, k] = hull_axial[:, :, upper_ventral_hull_k]
+            if verbose:
+                print(f'  hull dorsal extrapolation: filled {nk_ - 1 - dorsal_hull_k} slices from k={upper_ventral_hull_k} (upper ventral hull)')
+
+        # Extrapolate the hull to the ventral boundary (j=0) to ensure proper
+        # outside region definition. The hull must extend to volume boundaries
+        # so the outside region can flow around it.
+        # Find the most ventral hull slice and use it to fill lower j regions.
+        hull_j = np.where(hull_axial.any(axis=(0, 2)))[0]
+        if len(hull_j) > 0 and hull_j.min() > 0:
+            # Use the most ventral hull as template for extrapolation
+            ventral_hull_j = int(hull_j.min())
+            for j in range(0, ventral_hull_j):
+                hull_axial[:, j, :] = hull_axial[:, ventral_hull_j, :]
+            if verbose:
+                print(f'  hull ventral extrapolation: filled {ventral_hull_j} rows from j={ventral_hull_j}')
+
+        # Also extrapolate to the dorsal boundary in j direction if needed
+        if len(hull_j) > 0 and hull_j.max() < nj_ - 1:
+            dorsal_hull_j = int(hull_j.max())
+            for j in range(dorsal_hull_j + 1, nj_):
+                hull_axial[:, j, :] = hull_axial[:, dorsal_hull_j, :]
+            if verbose:
+                print(f'  hull dorsal j extrapolation: filled {nj_ - 1 - dorsal_hull_j} rows from j={dorsal_hull_j}')
+
+        # Dilate the hull to ensure it properly encloses the braincase at the dorsal end.
+        # The hull is built from bone, but the braincase extends beyond the bone rim at
+        # the dorsal end (where the vault rim is thin). Dilating the hull by 2 mm
+        # ensures it encloses the braincase even where bone is sparse.
+        hull_dilate_mm = 2.0
+        hull_dilate_iters = max(1, int(round(hull_dilate_mm / voxel_mm)))
+        hull_dilated = np.zeros_like(hull_axial)
+        for k in range(nk_):
+            hull_dilated[:, :, k] = binary_dilation(hull_axial[:, :, k], iterations=hull_dilate_iters)
+        hull_axial = hull_dilated
+        if verbose:
+            print(f'  hull dilation: {hull_dilate_mm} mm ({hull_dilate_iters} iter)')
+
         outside_hull = ~hull_axial
         shell = closed_bone | seal | floor | outside_hull
         if verbose:
@@ -490,6 +686,40 @@ def bone_shell_cavity(arr, aff, *, bone_low,
     info['cavity_mm3'] = float(cavity.sum()) * voxel_mm**3
     info['n_cc'] = int(n_cc)
     return cavity, info
+
+
+def fill_holes_2p5d(mask, exclude=None):
+    """Fill 2D-enclosed holes slice-by-slice along all three axes.
+
+    A plain 3D :func:`scipy.ndimage.binary_fill_holes` only fills voids
+    that are enclosed *in 3D*. A cavity extracted from a skull whose
+    field of view clips an opening can keep a
+    void that escapes in 3D through that clip, yet is plainly enclosed
+    in every 2D cross-section -- it shows up as a slot or a hole in
+    orthoslice QC. Filling per-slice in all three planes reclaims it
+    while staying local: a voxel is only added if it is walled in within
+    some principal plane. The three sweeps are applied in sequence, so a
+    voxel reclaimed in one plane can enclose another in the next; this
+    is intentional (it closes a void from whichever direction it is
+    bounded) but makes the operation mildly order-dependent, so it is a
+    clean-up for a known leak, not a general-purpose segmenter.
+
+    ``exclude`` (e.g. the bone mask) is removed from the result, so the
+    fill itself can never claim bone.
+    """
+    out = np.asarray(mask).astype(bool).copy()
+    from scipy.ndimage import binary_fill_holes as _bfh
+    for axis in range(3):
+        for i in range(out.shape[axis]):
+            sel = [slice(None)] * 3
+            sel[axis] = i
+            sel = tuple(sel)
+            plane = out[sel]
+            if plane.any():
+                out[sel] = _bfh(plane)
+    if exclude is not None:
+        out &= ~np.asarray(exclude).astype(bool)
+    return out
 
 
 def cavity_centroid_world_mm(cavity_path):

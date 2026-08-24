@@ -97,13 +97,24 @@ def downsample_tiff_stack_to_nifti(tiff_paths, target_voxel_mm,
                                    native_voxel_mm, out_path,
                                    axis_flip_kwargs=None,
                                    voxel_signs=(-1, -1, +1),
+                                   pad_slices=0,
                                    force=False, verbose=True):
     """Stream a TIFF stack, block-max-decimate to ``target_voxel_mm``,
-    apply storage-axis flips, and write a clean RAS NIfTI.
+    apply storage-axis flips, pad with zeros if requested, and write a
+    clean RAS NIfTI.
 
     ``axis_flip_kwargs`` is a dict of kwargs passed to
     :func:`tuba.core.frame.apply_axis_flips` (e.g.
     ``{'slice_flip': True, 'row_flip': False, 'col_flip': True}``).
+
+    ``pad_slices`` adds that many zero-filled slices at EACH end of the
+    stack axis, in raw-stack order (i.e. before ``axis_flip_kwargs`` is
+    applied, so the padding is independent of any ``slice_flip``). Use
+    it when the scan's field of view ends flush against the specimen
+    along the stack axis: downstream morphology (the cavity extractor's
+    closings/dilations) and the pre-alignment rotation both need a few
+    mm of empty margin, and without it the structure at the flush end
+    -- for Saimiri, the occiput -- comes back truncated.
     """
     import tifffile
     if os.path.exists(out_path) and not force:
@@ -137,6 +148,13 @@ def downsample_tiff_stack_to_nifti(tiff_paths, target_voxel_mm,
     if verbose:
         print(f'  raw downsampled shape: {vol.shape}, dtype {vol.dtype}, '
               f'min={vol.min()}, max={vol.max()}')
+    # Extend the field of view along the stack axis BEFORE the flips, so
+    # the margin is symmetric and does not depend on ``slice_flip``.
+    if pad_slices > 0:
+        vol = np.pad(vol, ((pad_slices, pad_slices), (0, 0), (0, 0)),
+                     mode='constant', constant_values=0)
+        if verbose:
+            print(f'  padded stack axis by {pad_slices} each end -> {vol.shape}')
     if axis_flip_kwargs is not None:
         vol = frame.apply_axis_flips(vol, **axis_flip_kwargs)
         if verbose:
